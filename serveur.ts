@@ -6,7 +6,7 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Configuration de la base de données PostgreSQL (Locale ou Cloud via Render)
+// Configuration de la base de données PostgreSQL
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL || 'postgresql://localhost:5432/tontine',
     ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
@@ -51,7 +51,6 @@ app.get('/rejoindre/:code', async (req, res) => {
 
         const cercle = result.rows[0];
 
-        // Code HTML de la page d'inscription avec script dynamique pour le bouton
         res.send(`
             <!DOCTYPE html>
             <html lang="fr">
@@ -97,7 +96,7 @@ app.get('/rejoindre/:code', async (req, res) => {
                         if(data.success) {
                             alert(data.message);
                         } else {
-                            alert("Erreur : " + data.error);
+                            alert("Désolé : " + data.error);
                         }
                     }
                 </script>
@@ -110,7 +109,7 @@ app.get('/rejoindre/:code', async (req, res) => {
     }
 });
 
-// Route 3 : Traiter l'inscription du participant en base de données
+// Route 3 : Traiter l'inscription du participant AVEC VERIFICATION ANTI-DOUBLON
 app.post('/rejoindre-cercle', async (req, res) => {
     const { nom, code } = req.body;
 
@@ -119,6 +118,17 @@ app.post('/rejoindre-cercle', async (req, res) => {
     }
 
     try {
+        // 🛡️ SÉCURITÉ : On vérifie si ce nom existe déjà dans cette tontine spécifique
+        const checkDuplicate = await pool.query(
+            'SELECT * FROM participants WHERE UPPER(nom_participant) = UPPER($1) AND code_invitation = $2',
+            [nom, code]
+        );
+
+        if (checkDuplicate.rows.length > 0) {
+            return res.status(400).json({ error: "Ce prénom est déjà inscrit dans cette tontine !" });
+        }
+
+        // Si tout est bon, on insère le nouveau membre
         await pool.query(
             'INSERT INTO participants (nom_participant, code_invitation) VALUES ($1, $2)',
             [nom, code]
