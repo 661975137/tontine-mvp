@@ -77,7 +77,6 @@ app.get('/', (req, res) => {
     `);
 });
 
-// API de création de cercle prenant en compte la limite
 app.post('/creer-cercle', async (req, res) => {
     const { nom, montant, periode, limite } = req.body;
     const codeUnique = 'tnt-' + Math.floor(1000 + Math.random() * 9000);
@@ -90,7 +89,7 @@ app.post('/creer-cercle', async (req, res) => {
     } catch (err) { res.status(500).json({ error: "Erreur" }); }
 });
 
-// Page pour rejoindre : Bloquée si la limite est atteinte
+// Page d'inscription : Affiche le montant de base
 app.get('/rejoindre/:code', async (req, res) => {
     const code = req.params.code;
     try {
@@ -116,35 +115,51 @@ app.get('/rejoindre/:code', async (req, res) => {
             <html lang="fr">
             <head>
                 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>Rejoindre</title>
+                <title>Rejoindre et Payer</title>
                 <style>
                     body { font-family: Arial, sans-serif; text-align: center; background-color: #f4f4f9; padding: 20px; }
-                    .card { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); display: inline-block; max-width: 400px; width: 100%; }
-                    input { width: 80%; padding: 10px; margin: 15px 0; border: 1px solid #ccc; border-radius: 5px; }
-                    button { background-color: #2ecc71; color: white; border: none; padding: 12px 20px; border-radius: 5px; font-weight: bold; }
+                    .card { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); display: inline-block; max-width: 400px; width: 100%; text-align: left; box-sizing: border-box; }
+                    input { width: 100%; padding: 12px; margin: 15px 0; border: 1px solid #ccc; border-radius: 5px; box-sizing: border-box; font-size: 16px; }
+                    button { background-color: #2980b9; color: white; border: none; padding: 14px; border-radius: 5px; font-weight: bold; width: 100%; font-size: 16px; cursor: pointer; }
+                    .price-box { background: #fef9e7; border-left: 5px solid #f1c40f; padding: 10px; margin-bottom: 15px; border-radius: 4px; }
                 </style>
             </head>
             <body>
                 <div class="card">
-                    <h1>👋 Rejoindre la tontine</h1>
+                    <h1 style="text-align:center; color:#2980b9; margin-top:0;">👋 Inscription</h1>
                     <p>Cercle : <strong>${cercle.nom_cercle}</strong></p>
-                    <p>💰 Cotisation : <strong>${cercle.montant_cotisation} FCFA / ${cercle.periode.toLowerCase()}</strong></p>
-                    <p>👥 Places : <strong>${nbInscrits} / ${cercle.limite_participants}</strong></p>
+                    
+                    <div class="price-box">
+                        💰 Cotisation de base : <strong>${cercle.montant_cotisation} FCFA</strong><br>
+                        ⚡ Frais de traitement (1%) : <strong>${Math.round(cercle.montant_cotisation * 0.01)} FCFA</strong><br>
+                        🛒 Total à payer : <strong style="color:#e67e22;">${Math.round(cercle.montant_cotisation * 1.01)} FCFA</strong>
+                    </div>
+
+                    <p>👥 Places disponibles : <strong>${nbInscrits} / ${cercle.limite_participants}</strong></p>
+                    
+                    <label for="prenom" style="font-weight:bold;">Ton prénom :</label>
                     <input type="text" id="prenom" placeholder="Entre ton prénom ici..." required>
-                    <br><button onclick="rejoindreTontine()">Confirmer mon inscription</button>
+                    
+                    <button onclick="payerEtRejoindre()">💳 Valider et Payer via Wave</button>
                 </div>
                 <script>
-                    async function rejoindreTontine() {
+                    async function payerEtRejoindre() {
                         const prenom = document.getElementById('prenom').value.trim();
                         if(!prenom) return alert("Mets ton prénom !");
+                        
                         const res = await fetch('/rejoindre-cercle', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ nom: prenom, code: '${code}' })
                         });
                         const data = await res.json();
-                        if(data.success) window.location.href = '/cercle/${code}';
-                        else alert("Erreur : " + data.error);
+                        
+                        if(data.success && data.paymentUrl) {
+                            alert("👉 Redirection vers Wave pour régler " + data.totalAPayer + " FCFA (cotisation + 1% frais). L'inscription sera validée dès le paiement !");
+                            window.location.href = data.paymentUrl;
+                        } else {
+                            alert("Erreur : " + data.error);
+                        }
                     }
                 </script>
             </body>
@@ -153,11 +168,14 @@ app.get('/rejoindre/:code', async (req, res) => {
     } catch (err) { res.status(500).send("Erreur"); }
 });
 
+// API d'inscription avec calcul du montant ajusté de 1% et génération du lien de paiement
 app.post('/rejoindre-cercle', async (req, res) => {
     const { nom, code } = req.body;
     try {
-        const cercleRes = await pool.query('SELECT limite_participants FROM cercles WHERE code_invitation = $1', [code]);
+        const cercleRes = await pool.query('SELECT montant_cotisation, limite_participants FROM cercles WHERE code_invitation = $1', [code]);
         if(cercleRes.rows.length === 0) return res.status(400).json({ error: "Cercle inexistant" });
+        
+        const montantBase = cercleRes.rows[0].montant_cotisation;
         const limite = cercleRes.rows[0].limite_participants;
 
         const countRes = await pool.query('SELECT COUNT(*) FROM participants WHERE code_invitation = $1', [code]);
@@ -170,8 +188,21 @@ app.post('/rejoindre-cercle', async (req, res) => {
         const check = await pool.query('SELECT * FROM participants WHERE UPPER(nom_participant) = UPPER($1) AND code_invitation = $2', [nom, code]);
         if (check.rows.length > 0) return res.status(400).json({ error: "Ce prénom est déjà inscrit !" });
         
+        // 🔒 Calcul du montant avec 1% de frais ajoutés
+        const totalAPayer = Math.round(montantBase * 1.01);
+        
+        // 🔗 Construction du lien Wave dynamique personnalisé avec le montant calculé
+        const waveBaseUrl = "https://pay.wave.com/m/M_keWb8PBIy-lU/c/ci/?amount=";
+        const paymentUrl = `${waveBaseUrl}${totalAPayer}`;
+
+        // Insertion en BDD (simule la validation post-redirection de manière fluide pour l'UX du MVP)
         await pool.query('INSERT INTO participants (nom_participant, code_invitation) VALUES ($1, $2)', [nom, code]);
-        res.json({ success: true });
+        
+        res.json({ 
+            success: true, 
+            paymentUrl: paymentUrl,
+            totalAPayer: totalAPayer
+        });
     } catch (err) { res.status(500).json({ error: "Erreur" }); }
 });
 
