@@ -10,6 +10,7 @@ const pool = new Pool({
     ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
 });
 
+// Page d'accueil : Formulaire de création avec limite de participants
 app.get('/', (req, res) => {
     res.send(`
         <!DOCTYPE html>
@@ -29,16 +30,23 @@ app.get('/', (req, res) => {
         <body>
             <div class="card">
                 <h1>🚀 Nouvelle Tontine</h1>
+                
                 <label for="nom">🎯 Nom du cercle</label>
                 <input type="text" id="nom" placeholder="Ex: Tontine Famille..." required>
+                
                 <label for="montant">💰 Montant de la cotisation (FCFA)</label>
                 <input type="number" id="montant" placeholder="Ex: 25000" required>
+                
                 <label for="periode">📅 Période des rotations</label>
                 <select id="periode">
                     <option value="Semaine">Par Semaine</option>
                     <option value="Quinzaine">Par Quinzaine</option>
                     <option value="Mois" selected>Par Mois</option>
                 </select>
+
+                <label for="limite">👥 Nombre max de participants</label>
+                <input type="number" id="limite" value="5" min="2" required>
+
                 <button onclick="creerTontine()">Créer le cercle</button>
             </div>
             <script>
@@ -46,11 +54,19 @@ app.get('/', (req, res) => {
                     const nom = document.getElementById('nom').value.trim();
                     const montant = document.getElementById('montant').value;
                     const periode = document.getElementById('periode').value;
-                    if(!nom || !montant) return alert("Remplis tout !");
+                    const limite = document.getElementById('limite').value;
+
+                    if(!nom || !montant || !limite) return alert("Remplis tout !");
+                    
                     const response = await fetch('/creer-cercle', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ nom, montant: parseInt(montant), periode })
+                        body: JSON.stringify({ 
+                            nom, 
+                            montant: parseInt(montant), 
+                            periode, 
+                            limite: parseInt(limite) 
+                        })
                     });
                     const data = await response.json();
                     if(data.codeUnique) window.location.href = '/cercle/' + data.codeUnique;
@@ -61,24 +77,40 @@ app.get('/', (req, res) => {
     `);
 });
 
+// API de création de cercle prenant en compte la limite
 app.post('/creer-cercle', async (req, res) => {
-    const { nom, montant, periode } = req.body;
+    const { nom, montant, periode, limite } = req.body;
     const codeUnique = 'tnt-' + Math.floor(1000 + Math.random() * 9000);
     try {
         await pool.query(
-            'INSERT INTO cercles (nom_cercle, montant_cotisation, code_invitation, periode) VALUES ($1, $2, $3, $4)',
-            [nom, montant, codeUnique, periode || 'Mois']
+            'INSERT INTO cercles (nom_cercle, montant_cotisation, code_invitation, periode, limite_participants) VALUES ($1, $2, $3, $4, $5)',
+            [nom, montant, codeUnique, periode || 'Mois', limite || 10]
         );
         res.json({ codeUnique });
     } catch (err) { res.status(500).json({ error: "Erreur" }); }
 });
 
+// Page pour rejoindre : Bloquée si la limite est atteinte
 app.get('/rejoindre/:code', async (req, res) => {
     const code = req.params.code;
     try {
-        const result = await pool.query('SELECT * FROM cercles WHERE code_invitation = $1', [code]);
-        if (result.rows.length === 0) return res.send("<h1>❌ Tontine introuvable</h1>");
-        const cercle = result.rows[0];
+        const cercleRes = await pool.query('SELECT * FROM cercles WHERE code_invitation = $1', [code]);
+        if (cercleRes.rows.length === 0) return res.send("<h1>❌ Tontine introuvable</h1>");
+        const cercle = cercleRes.rows[0];
+
+        const countRes = await pool.query('SELECT COUNT(*) FROM participants WHERE code_invitation = $1', [code]);
+        const nbInscrits = parseInt(countRes.rows[0].count);
+
+        if (nbInscrits >= cercle.limite_participants) {
+            return res.send(`
+                <div style="font-family:Arial; text-align:center; padding:50px;">
+                    <h1>🛑 Désolé, cette tontine est complète !</h1>
+                    <p>Le nombre maximum de <strong>${cercle.limite_participants} participants</strong> a été atteint.</p>
+                    <br><a href="/cercle/${code}" style="color:#3498db; text-decoration:none;">📊 Voir le tableau de bord</a>
+                </div>
+            `);
+        }
+
         res.send(`
             <!DOCTYPE html>
             <html lang="fr">
@@ -94,9 +126,10 @@ app.get('/rejoindre/:code', async (req, res) => {
             </head>
             <body>
                 <div class="card">
-                    <h1>👋 Bienvenue !</h1>
+                    <h1>👋 Rejoindre la tontine</h1>
                     <p>Cercle : <strong>${cercle.nom_cercle}</strong></p>
                     <p>💰 Cotisation : <strong>${cercle.montant_cotisation} FCFA / ${cercle.periode.toLowerCase()}</strong></p>
+                    <p>👥 Places : <strong>${nbInscrits} / ${cercle.limite_participants}</strong></p>
                     <input type="text" id="prenom" placeholder="Entre ton prénom ici..." required>
                     <br><button onclick="rejoindreTontine()">Confirmer mon inscription</button>
                 </div>
@@ -123,8 +156,20 @@ app.get('/rejoindre/:code', async (req, res) => {
 app.post('/rejoindre-cercle', async (req, res) => {
     const { nom, code } = req.body;
     try {
+        const cercleRes = await pool.query('SELECT limite_participants FROM cercles WHERE code_invitation = $1', [code]);
+        if(cercleRes.rows.length === 0) return res.status(400).json({ error: "Cercle inexistant" });
+        const limite = cercleRes.rows[0].limite_participants;
+
+        const countRes = await pool.query('SELECT COUNT(*) FROM participants WHERE code_invitation = $1', [code]);
+        const nbInscrits = parseInt(countRes.rows[0].count);
+
+        if(nbInscrits >= limite) {
+            return res.status(400).json({ error: "La tontine a atteint sa limite maximale !" });
+        }
+
         const check = await pool.query('SELECT * FROM participants WHERE UPPER(nom_participant) = UPPER($1) AND code_invitation = $2', [nom, code]);
         if (check.rows.length > 0) return res.status(400).json({ error: "Ce prénom est déjà inscrit !" });
+        
         await pool.query('INSERT INTO participants (nom_participant, code_invitation) VALUES ($1, $2)', [nom, code]);
         res.json({ success: true });
     } catch (err) { res.status(500).json({ error: "Erreur" }); }
@@ -145,9 +190,8 @@ app.post('/lancer-tirage/:code', async (req, res) => {
         for (let i = 0; i < ids.length; i++) {
             await pool.query('UPDATE participants SET ordre_passage = $1 WHERE id = $2', [i + 1, ids[i]]);
         }
-
         res.json({ success: true });
-    } catch (err) { res.status(500).json({ error: "Erreur tirage" }); }
+    } catch (err) { res.status(500).json({ error: "Erreur" }); }
 });
 
 app.get('/cercle/:code', async (req, res) => {
@@ -180,8 +224,13 @@ app.get('/cercle/:code', async (req, res) => {
             sectionTirage += `</div>`;
         }
 
-        // 🔗 CORRECTIF ICI : Lien d'invitation direct et personnalisé pour WhatsApp
-        const messageWhatsApp = encodeURIComponent(`Rejoins ma tontine "${cercle.nom_cercle}" (${cercle.montant_cotisation} FCFA / ${cercle.periode.toLowerCase()}) en cliquant ici : https://tontine-mvp.onrender.com/rejoindre/${code}`);
+        let boutonWhatsAppHtml = '';
+        if (pNoms.length < cercle.limite_participants) {
+            const messageWhatsApp = encodeURIComponent(`Rejoins ma tontine "${cercle.nom_cercle}" (${cercle.montant_cotisation} FCFA / ${cercle.periode.toLowerCase()}) : https://tontine-mvp.onrender.com/rejoindre/${code}`);
+            boutonWhatsAppHtml = `<a class="btn-action" style="background:#25D366;" href="https://wa.me/?text=${messageWhatsApp}" target="_blank">🟢 Inviter via WhatsApp</a>`;
+        } else {
+            boutonWhatsAppHtml = `<div style="text-align:center; background:#e2e8f0; color:#4a5568; padding:12px; border-radius:6px; font-weight:bold; margin-top:10px;">👥 Tontine complète (${pNoms.length}/${cercle.limite_participants}) - Invitations fermées</div>`;
+        }
 
         res.send(`
             <!DOCTYPE html>
@@ -206,7 +255,7 @@ app.get('/cercle/:code', async (req, res) => {
                     <div class="info-box">
                         🎯 Tontine : <strong>${cercle.nom_cercle}</strong><br>
                         💰 Cotisation : <strong>${cercle.montant_cotisation} FCFA / ${cercle.periode.toLowerCase()}</strong><br>
-                        👥 Membres : <strong>${pNoms.length}</strong>
+                        👥 Membres : <strong>${pNoms.length} / ${cercle.limite_participants}</strong>
                     </div>
 
                     ${sectionTirage}
@@ -218,7 +267,7 @@ app.get('/cercle/:code', async (req, res) => {
                     </table>
 
                     ${boutonTirageHtml}
-                    <a class="btn-action" style="background:#25D366;" href="https://wa.me/?text=${messageWhatsApp}" target="_blank">🟢 Inviter via WhatsApp</a>
+                    ${boutonWhatsAppHtml}
                     <a href="/" style="display:block; text-align:center; color:#718096; margin-top:15px; text-decoration:none; font-size:14px;">➕ Créer une autre tontine</a>
                 </div>
 
