@@ -1,6 +1,5 @@
 import express from 'express';
 import { Pool } from 'pg';
-import path from 'path';
 
 const app = express();
 app.use(express.json());
@@ -11,7 +10,6 @@ const pool = new Pool({
     ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
 });
 
-// 🌟 NOUVELLE ROUTE : Interface de création de tontine au choix !
 app.get('/', (req, res) => {
     res.send(`
         <!DOCTYPE html>
@@ -26,55 +24,37 @@ app.get('/', (req, res) => {
                 h1 { color: #2ecc71; text-align: center; margin-top: 0; font-size: 24px; }
                 label { font-weight: bold; color: #34495e; display: block; margin-top: 15px; }
                 input, select { width: 100%; padding: 12px; margin-top: 5px; border: 1px solid #ccc; border-radius: 6px; font-size: 16px; box-sizing: border-box; }
-                button { background-color: #2ecc71; color: white; border: none; padding: 14px; border-radius: 6px; cursor: pointer; font-size: 16px; font-weight: bold; width: 100%; margin-top: 25px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-                button:hover { background-color: #27ae60; }
+                button { background-color: #2ecc71; color: white; border: none; padding: 14px; border-radius: 6px; cursor: pointer; font-size: 16px; font-weight: bold; width: 100%; margin-top: 25px; }
             </style>
         </head>
         <body>
             <div class="card">
                 <h1>🚀 Nouvelle Tontine</h1>
-                <p style="text-align:center; color:#7f8c8d; font-size:14px; margin-top:0;">Configurez votre cercle sur-mesure</p>
-                
                 <label for="nom">🎯 Nom du cercle</label>
-                <input type="text" id="nom" placeholder="Ex: Tontine Famille, Business..." required>
-
+                <input type="text" id="nom" placeholder="Ex: Tontine Famille..." required>
                 <label for="montant">💰 Montant de la cotisation (FCFA)</label>
                 <input type="number" id="montant" placeholder="Ex: 25000" required>
-
                 <label for="periode">📅 Période des rotations</label>
                 <select id="periode">
                     <option value="Semaine">Par Semaine</option>
-                    <option value="Quinzaine">Par Quinzaine (Chaque 15 jours)</option>
+                    <option value="Quinzaine">Par Quinzaine</option>
                     <option value="Mois" selected>Par Mois</option>
                 </select>
-
-                <button onclick="creerTontine()">Créer le cercle et générer le lien</button>
+                <button onclick="creerTontine()">Créer le cercle</button>
             </div>
-
             <script>
                 async function creerTontine() {
                     const nom = document.getElementById('nom').value.trim();
                     const montant = document.getElementById('montant').value;
                     const periode = document.getElementById('periode').value;
-
-                    if(!nom || !montant) {
-                        alert("Veuillez remplir tous les champs !");
-                        return;
-                    }
-
+                    if(!nom || !montant) return alert("Remplis tout !");
                     const response = await fetch('/creer-cercle', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ nom, montant: parseInt(montant), periode })
                     });
-
                     const data = await response.json();
-                    if(data.codeUnique) {
-                        alert("🎉 Cercle créé ! Redirection vers le tableau de bord...");
-                        window.location.href = '/cercle/' + data.codeUnique;
-                    } else {
-                        alert("Erreur lors de la création");
-                    }
+                    if(data.codeUnique) window.location.href = '/cercle/' + data.codeUnique;
                 }
             </script>
         </body>
@@ -82,49 +62,35 @@ app.get('/', (req, res) => {
     `);
 });
 
-// Modification de la route API de création pour inclure la période
 app.post('/creer-cercle', async (req, res) => {
     const { nom, montant, periode } = req.body;
     const codeUnique = 'tnt-' + Math.floor(1000 + Math.random() * 9000);
-    const periodeChoisie = periode || 'Mois';
-
     try {
         await pool.query(
             'INSERT INTO cercles (nom_cercle, montant_cotisation, code_invitation, periode) VALUES ($1, $2, $3, $4)',
-            [nom, montant, codeUnique, periodeChoisie]
+            [nom, montant, codeUnique, periode || 'Mois']
         );
-        res.json({
-            message: "Cercle cree !",
-            codeUnique: codeUnique,
-            lienInvitation: `https://tontine-mvp.onrender.com/rejoindre/${codeUnique}`
-        });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: "Erreur lors de la création" });
-    }
+        res.json({ codeUnique });
+    } catch (err) { res.status(500).json({ error: "Erreur" }); }
 });
 
-// Route d'inscription
 app.get('/rejoindre/:code', async (req, res) => {
     const code = req.params.code;
     try {
         const result = await pool.query('SELECT * FROM cercles WHERE code_invitation = $1', [code]);
         if (result.rows.length === 0) return res.send("<h1>❌ Tontine introuvable</h1>");
         const cercle = result.rows[0];
-
         res.send(`
             <!DOCTYPE html>
             <html lang="fr">
             <head>
-                <meta charset="UTF-8">
-                <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>Rejoindre la Tontine</title>
+                <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Rejoindre</title>
                 <style>
                     body { font-family: Arial, sans-serif; text-align: center; background-color: #f4f4f9; padding: 20px; }
                     .card { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); display: inline-block; max-width: 400px; width: 100%; }
-                    h1 { color: #2ecc71; }
-                    input { width: 80%; padding: 10px; margin: 15px 0; border: 1px solid #ccc; border-radius: 5px; font-size: 16px; }
-                    button { background-color: #2ecc71; color: white; border: none; padding: 12px 20px; border-radius: 5px; cursor: pointer; font-size: 16px; font-weight: bold; }
+                    input { width: 80%; padding: 10px; margin: 15px 0; border: 1px solid #ccc; border-radius: 5px; }
+                    button { background-color: #2ecc71; color: white; border: none; padding: 12px 20px; border-radius: 5px; font-weight: bold; }
                 </style>
             </head>
             <body>
@@ -133,9 +99,7 @@ app.get('/rejoindre/:code', async (req, res) => {
                     <p>Cercle : <strong>${cercle.nom_cercle}</strong></p>
                     <p>💰 Cotisation : <strong>${cercle.montant_cotisation} FCFA / ${cercle.periode.toLowerCase()}</strong></p>
                     <input type="text" id="prenom" placeholder="Entre ton prénom ici..." required>
-                    <br>
-                    <button onclick="rejoindreTontine()">Confirmer mon inscription</button>
-                    <br><br><a href="/cercle/${code}" style="color:#3498db; text-decoration:none;">📊 Voir le tableau de bord</a>
+                    <br><button onclick="rejoindreTontine()">Confirmer mon inscription</button>
                 </div>
                 <script>
                     async function rejoindreTontine() {
@@ -147,8 +111,8 @@ app.get('/rejoindre/:code', async (req, res) => {
                             body: JSON.stringify({ nom: prenom, code: '${code}' })
                         });
                         const data = await res.json();
-                        if(data.success) { alert("Inscription validée !"); window.location.href = '/cercle/${code}'; }
-                        else { alert("Erreur : " + data.error); }
+                        if(data.success) window.location.href = '/cercle/${code}';
+                        else alert("Erreur : " + data.error);
                     }
                 </script>
             </body>
@@ -164,24 +128,33 @@ app.post('/rejoindre-cercle', async (req, res) => {
         if (check.rows.length > 0) return res.status(400).json({ error: "Ce prénom est déjà inscrit !" });
         await pool.query('INSERT INTO participants (nom_participant, code_invitation) VALUES ($1, $2)', [nom, code]);
         res.json({ success: true });
-    } catch (err) { res.status(500).json({ error: "Erreur base" }); }
+    } catch (err) { res.status(500).json({ error: "Erreur" }); }
 });
 
-let tiragesStockes: { [key: string]: string[] } = {};
-
-app.post('/lancer-tirage/:code', (req, res) => {
+// ROUTE 4 : Tirage au sort robuste enregistré en Base de données Cloud
+app.post('/lancer-tirage/:code', async (req, res) => {
     const code = req.params.code;
-    const { liste } = req.body;
-    let copieListe = [...liste];
-    for (let i = copieListe.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [copieListe[i], copieListe[j]] = [copieListe[j], copieListe[i]];
-    }
-    tiragesStockes[code] = copieListe;
-    res.json({ success: true, ordre: copieListe });
+    try {
+        const participantsRes = await pool.query('SELECT id FROM participants WHERE code_invitation = $1 AND ordre_passage IS NULL', [code]);
+        if(participantsRes.rows.length === 0) return res.status(400).json({ error: "Le tirage a déjà été fait ou pas assez de membres." });
+
+        let ids = participantsRes.rows.map(r => r.id);
+        // Mélange
+        for (let i = ids.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [ids[i], ids[j]] = [ids[j], ids[i]];
+        }
+
+        // Sauvegarder l'ordre de chaque participant en BDD
+        for (let i = 0; i < ids.length; i++) {
+            await pool.query('UPDATE participants SET ordre_passage = $1 WHERE id = $2', [i + 1, ids[i]]);
+        }
+
+        res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: "Erreur tirage" }); }
 });
 
-// Tableau de bord adapté avec l'affichage de la période personnalisée
+// ROUTE 5 : Tableau de bord connecté à la BDD pour l'ordre
 app.get('/cercle/:code', async (req, res) => {
     const code = req.params.code;
     try {
@@ -189,17 +162,25 @@ app.get('/cercle/:code', async (req, res) => {
         if (cercleRes.rows.length === 0) return res.send("<h1>❌ Tontine introuvable</h1>");
         const cercle = cercleRes.rows[0];
 
-        const participantsRes = await pool.query('SELECT nom_participant FROM participants WHERE code_invitation = $1', [code]);
+        // Charger les participants triés par date d'inscription d'origine
+        const participantsRes = await pool.query('SELECT nom_participant FROM participants WHERE code_invitation = $1 ORDER BY id ASC', [code]);
         const pNoms = participantsRes.rows.map(r => r.nom_participant);
+
+        // Charger le calendrier officiel trié par ordre_passage
+        const calendrierRes = await pool.query('SELECT nom_participant FROM participants WHERE code_invitation = $1 AND ordre_passage IS NOT NULL ORDER BY ordre_passage ASC', [code]);
+        const ordreTirage = calendrierRes.rows.map(r => r.nom_participant);
 
         let lignesTableau = '';
         pNoms.forEach((nom, index) => {
             lignesTableau += `<tr><td style="font-weight:bold; color:#7f8c8d; width:40px;">${index + 1}</td><td>👤 ${nom}</td></tr>`;
         });
 
-        const ordreTirage = tiragesStockes[code] || [];
         let sectionTirage = '';
+        let boutonTirageHtml = `<button class="btn-action" style="background:#f39c12;" onclick="lancerLeTirage()">🎲 Lancer le tirage au sort</button>`;
+
         if (ordreTirage.length > 0) {
+            // Le tirage est fait : on masque le bouton orange !
+            boutonTirageHtml = `<div style="text-align:center; color:#27ae60; font-weight:bold; margin-top:15px;">🔒 Ordre de tirage verrouillé en Base de données Cloud</div>`;
             sectionTirage = `<h3>📅 Calendrier des Bénéficiaires :</h3><div style="background:#fef9e7; padding:15px; border-radius:8px; border-left:5px solid #f39c12; margin-bottom:20px;">`;
             ordreTirage.forEach((nom, index) => {
                 sectionTirage += `🔹 <strong>${cercle.periode} ${index + 1}</strong> : ${nom} (Gagne ${pNoms.length * cercle.montant_cotisation} FCFA) <br>`;
@@ -207,14 +188,13 @@ app.get('/cercle/:code', async (req, res) => {
             sectionTirage += `</div>`;
         }
 
-        const messageWhatsApp = encodeURIComponent(`Rejoins ma tontine "${cercle.nom_cercle}" (${cercle.montant_cotisation} FCFA / ${cercle.periode.toLowerCase()}) : https://tontine-mvp.onrender.com/rejoindre/${code}`);
+        const messageWhatsApp = encodeURIComponent(`Rejoins ma tontine "${cercle.nom_cercle}" : https://tontine-mvp.onrender.com/rejoindre/${code}`);
 
         res.send(`
             <!DOCTYPE html>
             <html lang="fr">
             <head>
-                <meta charset="UTF-8">
-                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
                 <title>Tableau de bord</title>
                 <style>
                     body { font-family: Arial, sans-serif; text-align: center; background-color: #f4f4f9; padding: 15px; margin: 0; }
@@ -244,22 +224,17 @@ app.get('/cercle/:code', async (req, res) => {
                         <tbody>${lignesTableau}</tbody>
                     </table>
 
-                    <button class="btn-action" style="background:#f39c12;" onclick="lancerLeTirage()">🎲 Lancer le tirage au sort</button>
+                    ${boutonTirageHtml}
                     <a class="btn-action" style="background:#25D366;" href="https://wa.me/?text=${messageWhatsApp}" target="_blank">🟢 Inviter via WhatsApp</a>
                     <a href="/" style="display:block; text-align:center; color:#718096; margin-top:15px; text-decoration:none; font-size:14px;">➕ Créer une autre tontine</a>
                 </div>
 
                 <script>
                     async function lancerLeTirage() {
-                        const listeMembres = ${JSON.stringify(pNoms)};
-                        if(listeMembres.length < 2) return alert("Il faut au moins 2 membres !");
-                        const res = await fetch('/lancer-tirage/${code}', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ liste: listeMembres })
-                        });
+                        if(${pNoms.length} < 2) return alert("Il faut au moins 2 membres !");
+                        const res = await fetch('/lancer-tirage/${code}', { method: 'POST' });
                         const data = await res.json();
-                        if(data.success) { alert("🎲 Tirage effectué !"); window.location.reload(); }
+                        if(data.success) { alert("🎲 Tirage gravé en Base de données !"); window.location.reload(); }
                     }
                 </script>
             </body>
