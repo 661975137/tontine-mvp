@@ -1,0 +1,46 @@
+// Base de données temporaire en mémoire
+const cerclesBaseDonnees = new Map<string, { nom: string; montant: number }>();
+
+// 1. Fonction de génération du lien
+export function GenererLienInvitationWhatsApp(nomCercle: string, montant: number) {
+    // Génère un code aléatoire simple (ex: tnt-8492)
+    const codeUnique = "tnt-" + Math.floor(1000 + Math.random() * 9000);
+    cerclesBaseDonnees.set(codeUnique, { nom: nomCercle, montant: montant });
+
+    const lienApplication = `https://tontine.ci/join/${codeUnique}`;
+    const texteMessage = `Salut ! Rejoins ma tontine "${nomCercle}" (${montant} F/mois). Clique ici : ${lienApplication}`;
+    const lienWhatsAppPrincipal = `https://wa.me/?text=${encodeURIComponent(texteMessage)}`;
+
+    return { codeUnique, lienApplication, lienWhatsAppPrincipal };
+}
+
+// 2. Fonction pour rejoindre le cercle
+export function RejoindreCercleViaLien(codeUnique: string, prenomMembre: string) {
+    const cercle = cerclesBaseDonnees.get(codeUnique);
+    if (!cercle) {
+        console.log(`❌ Erreur : Le lien [${codeUnique}] n'existe pas.`);
+        return false;
+    }
+    console.log(`🤝 [APPLICATION] ${prenomMembre} a rejoint la tontine "${cercle.nom}" !`);
+    return true;
+}
+
+// 3. Scénario de test automatique
+function ExecuterTestInvitation() {
+    console.log("=== TEST DU MODULE INVITATION WHATSAPP ===");
+    
+    const invitation = GenererLienInvitationWhatsApp("Collègues Plateau V1", 25000);
+
+    console.log(`🔗 Code unique créé : ${invitation.codeUnique}`);
+    console.log(`💬 Message WhatsApp prêt à être envoyé !`);
+
+    console.log("\n--- Simulation des clics sur le lien ---");
+    RejoindreCercleViaLien(invitation.codeUnique, "Fatou");
+    RejoindreCercleViaLien(invitation.codeUnique, "Amadou");
+    RejoindreCercleViaLien("tnt-0000", "Inconnu");
+
+    console.log("\n=== FIN DU TEST INVITATION ===");
+}
+
+ExecuterTestInvitation();
+
