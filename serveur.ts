@@ -1,66 +1,136 @@
 import express from 'express';
-import { Client } from 'pg';
+import { Pool } from 'pg';
+import path from 'path';
 
 const app = express();
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-// Le serveur choisira automatiquement le port du cloud, ou le 3000 en local
-const PORT = process.env.PORT || 3000;
+// Configuration de la base de données PostgreSQL (Locale ou Cloud via Render)
+const pool = new Pool({
+    connectionString: process.env.DATABASE_URL || 'postgresql://localhost:5432/tontine',
+    ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
+});
 
-// Configuration flexible : utilise l'URL du Cloud ou les identifiants Termux locaux
-const configurationDb = process.env.DATABASE_URL 
-    ? { connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } }
-    : { database: 'tontinedb', user: 'u0_a454' };
+// Route d'accueil basique
+app.get('/', (req, res) => {
+    res.send('<h1>Bienvenue sur le serveur de Tontine !</h1>');
+});
 
-const clientEnregistre = new Client(configurationDb);
-clientEnregistre.connect();
-
-// 1. ROUTE POUR CRÉER UN CERCLE
+// Route 1 : Créer un cercle de tontine
 app.post('/creer-cercle', async (req, res) => {
     const { nom, montant } = req.body;
-    if (!nom || !montant) {
-        return res.status(400).json({ erreur: "Veuillez fournir un nom et un montant." });
-    }
-    const codeUnique = "tnt-" + Math.floor(1000 + Math.random() * 9000);
+    const codeUnique = 'tnt-' + Math.floor(1000 + Math.random() * 9000);
+
     try {
-        const requeteSql = 'INSERT INTO cercles(nom_cercle, montant_cotisation, code_invitation) VALUES($1, $2, $3)';
-        await clientEnregistre.query(requeteSql, [nom, montant, codeUnique]);
-        
-        // L'adresse s'adaptera automatiquement au nom de ton site internet !
-        const domaine = req.get('host');
-        const lienApplication = `https://${domaine}/rejoindre/${codeUnique}`;
-        const texteMessage = `Salut ! Rejoins ma tontine "${nom}" (${montant} F/mois). Clique ici : ${lienApplication}`;
-        const lienWhatsApp = `https://wa.me/?text=${encodeURIComponent(texteMessage)}`;
-        
-        res.json({ succes: true, codeUnique, lienApplication, lienWhatsApp });
-    } catch (erreur) {
-        console.error(erreur);
-        res.status(500).json({ erreur: "Erreur lors de la sauvegarde." });
+        await pool.query(
+            'INSERT INTO cercles (nom_cercle, montant_cotisation, code_invitation) VALUES ($1, $2, $3)',
+            [nom, montant, codeUnique]
+        );
+        res.json({
+            message: "Cercle cree avec succes !",
+            codeUnique: codeUnique,
+            lienInvitation: `https://tontine-mvp.onrender.com/rejoindre/${codeUnique}`
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Erreur lors de la creation du cercle" });
     }
 });
 
-// 2. ROUTE POUR REJOINDRE UN CERCLE
+// Route 2 : Afficher la page d'invitation d'une tontine
 app.get('/rejoindre/:code', async (req, res) => {
-    const codeUnique = req.params.code;
+    const code = req.params.code;
+
     try {
-        const requeteSql = 'SELECT * FROM cercles WHERE code_invitation = $1';
-        const resultatDb = await clientEnregistre.query(requeteSql, [codeUnique]);
-        if (resultatDb.rows.length === 0) {
-            return res.status(404).send("<h1>❌ Lien invalide ou tontine introuvable</h1>");
+        const result = await pool.query('SELECT * FROM cercles WHERE code_invitation = $1', [code]);
+
+        if (result.rows.length === 0) {
+            return res.send("<h1>❌ Lien invalide ou tontine introuvable</h1>");
         }
-        const cercle = resultatDb.rows[0];
+
+        const cercle = result.rows[0];
+
+        // Code HTML de la page d'inscription avec script dynamique pour le bouton
         res.send(`
-            <h1>🎉 Bienvenue dans la tontine !</h1>
-            <p>Tu es sur le point de rejoindre : <strong>${cercle.nom_cercle}</strong></p>
-            <p>Montant de la cotisation : <strong>${cercle.montant_cotisation} FCFA / mois</strong></p>
-            <button onclick="alert('Inscription validée !')">Confirmer mon inscription</button>
+            <!DOCTYPE html>
+            <html lang="fr">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Rejoindre la Tontine</title>
+                <style>
+                    body { font-family: Arial, sans-serif; text-align: center; background-color: #f4f4f9; padding: 20px; }
+                    .card { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); display: inline-block; max-width: 400px; width: 100%; }
+                    h1 { color: #2ecc71; }
+                    input { width: 80%; padding: 10px; margin: 15px 0; border: 1px solid #ccc; border-radius: 5px; font-size: 16px; }
+                    button { background-color: #2ecc71; color: white; border: none; padding: 12px 20px; border-radius: 5px; cursor: pointer; font-size: 16px; font-weight: bold; }
+                    button:hover { background-color: #27ae60; }
+                </style>
+            </head>
+            <body>
+                <div class="card">
+                    <h1>👋 Bienvenue dans la tontine !</h1>
+                    <p>On t'invite à rejoindre le cercle : <strong>${cercle.nom_cercle}</strong></p>
+                    <p>💰 Montant de la cotisation : <strong>${cercle.montant_cotisation} FCFA / mois</strong></p>
+                    
+                    <input type="text" id="prenom" placeholder="Entre ton prénom ici..." required>
+                    <br>
+                    <button onclick="rejoindreTontine()">Confirmer mon inscription</button>
+                </div>
+
+                <script>
+                    async function rejoindreTontine() {
+                        const prenomInput = document.getElementById('prenom').value.trim();
+                        if(!prenomInput) {
+                            alert("S'il te plaît, entre ton prénom !");
+                            return;
+                        }
+
+                        const response = await fetch('/rejoindre-cercle', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ nom: prenomInput, code: '${code}' })
+                        });
+
+                        const data = await response.json();
+                        if(data.success) {
+                            alert(data.message);
+                        } else {
+                            alert("Erreur : " + data.error);
+                        }
+                    }
+                </script>
+            </body>
+            </html>
         `);
-    } catch (erreur) {
-        console.error(erreur);
-        res.status(500).send("Erreur de lecture de la base de données.");
+    } catch (err) {
+        console.error(err);
+        res.status(500).send("Erreur serveur");
     }
 });
 
+// Route 3 : Traiter l'inscription du participant en base de données
+app.post('/rejoindre-cercle', async (req, res) => {
+    const { nom, code } = req.body;
+
+    if (!nom || !code) {
+        return res.status(400).json({ error: "Le nom et le code sont obligatoires" });
+    }
+
+    try {
+        await pool.query(
+            'INSERT INTO participants (nom_participant, code_invitation) VALUES ($1, $2)',
+            [nom, code]
+        );
+        res.json({ success: true, message: `Félicitations ${nom}, tu as rejoint la tontine !` });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Erreur lors de l'inscription en base de données" });
+    }
+});
+
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log(`🚀 Application en ligne sur le port ${PORT}`);
+    console.log(`🚀 Serveur en ligne sur le port ${PORT}`);
 });
