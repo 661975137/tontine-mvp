@@ -15,8 +15,7 @@ app.get('/', (req, res) => {
         <!DOCTYPE html>
         <html lang="fr">
         <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>Créer une Tontine</title>
             <style>
                 body { font-family: Arial, sans-serif; text-align: center; background-color: #f4f4f9; padding: 20px; margin: 0; }
@@ -131,21 +130,18 @@ app.post('/rejoindre-cercle', async (req, res) => {
     } catch (err) { res.status(500).json({ error: "Erreur" }); }
 });
 
-// ROUTE 4 : Tirage au sort robuste enregistré en Base de données Cloud
 app.post('/lancer-tirage/:code', async (req, res) => {
     const code = req.params.code;
     try {
         const participantsRes = await pool.query('SELECT id FROM participants WHERE code_invitation = $1 AND ordre_passage IS NULL', [code]);
-        if(participantsRes.rows.length === 0) return res.status(400).json({ error: "Le tirage a déjà été fait ou pas assez de membres." });
+        if(participantsRes.rows.length === 0) return res.status(400).json({ error: "Le tirage a déjà été fait." });
 
         let ids = participantsRes.rows.map(r => r.id);
-        // Mélange
         for (let i = ids.length - 1; i > 0; i--) {
             const j = Math.floor(Math.random() * (i + 1));
             [ids[i], ids[j]] = [ids[j], ids[i]];
         }
 
-        // Sauvegarder l'ordre de chaque participant en BDD
         for (let i = 0; i < ids.length; i++) {
             await pool.query('UPDATE participants SET ordre_passage = $1 WHERE id = $2', [i + 1, ids[i]]);
         }
@@ -154,7 +150,6 @@ app.post('/lancer-tirage/:code', async (req, res) => {
     } catch (err) { res.status(500).json({ error: "Erreur tirage" }); }
 });
 
-// ROUTE 5 : Tableau de bord connecté à la BDD pour l'ordre
 app.get('/cercle/:code', async (req, res) => {
     const code = req.params.code;
     try {
@@ -162,11 +157,9 @@ app.get('/cercle/:code', async (req, res) => {
         if (cercleRes.rows.length === 0) return res.send("<h1>❌ Tontine introuvable</h1>");
         const cercle = cercleRes.rows[0];
 
-        // Charger les participants triés par date d'inscription d'origine
         const participantsRes = await pool.query('SELECT nom_participant FROM participants WHERE code_invitation = $1 ORDER BY id ASC', [code]);
         const pNoms = participantsRes.rows.map(r => r.nom_participant);
 
-        // Charger le calendrier officiel trié par ordre_passage
         const calendrierRes = await pool.query('SELECT nom_participant FROM participants WHERE code_invitation = $1 AND ordre_passage IS NOT NULL ORDER BY ordre_passage ASC', [code]);
         const ordreTirage = calendrierRes.rows.map(r => r.nom_participant);
 
@@ -179,8 +172,7 @@ app.get('/cercle/:code', async (req, res) => {
         let boutonTirageHtml = `<button class="btn-action" style="background:#f39c12;" onclick="lancerLeTirage()">🎲 Lancer le tirage au sort</button>`;
 
         if (ordreTirage.length > 0) {
-            // Le tirage est fait : on masque le bouton orange !
-            boutonTirageHtml = `<div style="text-align:center; color:#27ae60; font-weight:bold; margin-top:15px;">🔒 Ordre de tirage verrouillé en Base de données Cloud</div>`;
+            boutonTirageHtml = `<div style="text-align:center; color:#27ae60; font-weight:bold; margin-top:15px; font-size:15px;">🔒 Ordre de tirage verrouillé en Base de données Cloud</div>`;
             sectionTirage = `<h3>📅 Calendrier des Bénéficiaires :</h3><div style="background:#fef9e7; padding:15px; border-radius:8px; border-left:5px solid #f39c12; margin-bottom:20px;">`;
             ordreTirage.forEach((nom, index) => {
                 sectionTirage += `🔹 <strong>${cercle.periode} ${index + 1}</strong> : ${nom} (Gagne ${pNoms.length * cercle.montant_cotisation} FCFA) <br>`;
@@ -188,7 +180,8 @@ app.get('/cercle/:code', async (req, res) => {
             sectionTirage += `</div>`;
         }
 
-        const messageWhatsApp = encodeURIComponent(`Rejoins ma tontine "${cercle.nom_cercle}" : https://tontine-mvp.onrender.com/rejoindre/${code}`);
+        // 🔗 CORRECTIF ICI : Lien d'invitation direct et personnalisé pour WhatsApp
+        const messageWhatsApp = encodeURIComponent(`Rejoins ma tontine "${cercle.nom_cercle}" (${cercle.montant_cotisation} FCFA / ${cercle.periode.toLowerCase()}) en cliquant ici : https://tontine-mvp.onrender.com/rejoindre/${code}`);
 
         res.send(`
             <!DOCTYPE html>
@@ -234,7 +227,7 @@ app.get('/cercle/:code', async (req, res) => {
                         if(${pNoms.length} < 2) return alert("Il faut au moins 2 membres !");
                         const res = await fetch('/lancer-tirage/${code}', { method: 'POST' });
                         const data = await res.json();
-                        if(data.success) { alert("🎲 Tirage gravé en Base de données !"); window.location.reload(); }
+                        if(data.success) { alert("🎲 Tirage effectué !"); window.location.reload(); }
                     }
                 </script>
             </body>
