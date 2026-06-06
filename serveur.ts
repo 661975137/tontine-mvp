@@ -141,40 +141,40 @@ app.post('/rejoindre-cercle', async (req, res) => {
     }
 });
 
-// 📊 NOUVELLE ROUTE 4 : Tableau de bord de la tontine
+// Route 4 : Tableau de bord de la tontine (CORRIGÉ ET AMÉLIORÉ)
 app.get('/cercle/:code', async (req, res) => {
     const code = req.params.code;
 
     try {
-        // 1. Récupérer les détails de la tontine
         const cercleRes = await pool.query('SELECT * FROM cercles WHERE code_invitation = $1', [code]);
         if (cercleRes.rows.length === 0) {
             return res.send("<h1>❌ Tontine introuvable</h1>");
         }
         const cercle = cercleRes.rows[0];
 
-        // 2. Récupérer tous les participants inscrits
         const participantsRes = await pool.query(
             'SELECT nom_participant, date_inscription FROM participants WHERE code_invitation = $1 ORDER BY date_inscription ASC',
             [code]
         );
         const participants = participantsRes.rows;
 
-        // Generator du tableau HTML
         let lignesTableau = '';
         if (participants.length === 0) {
-            lignesTableau = `<tr><td colspan="2" style="color: #95a5a6;">Aucun membre inscrit pour le moment.</td></tr>`;
+            lignesTableau = `<tr><td colspan="2" style="text-align: center; color: #95a5a6; padding: 20px;">Aucun membre inscrit pour le moment.</td></tr>`;
         } else {
             participants.forEach((p, index) => {
-                const date = new Date(p.date_inscription).toLocaleDateString('fr-FR');
                 lignesTableau += `
                     <tr>
-                        <td><strong>${index + 1}</strong></td>
+                        <td style="font-weight: bold; color: #7f8c8d; width: 40px;">${index + 1}</td>
                         <td>👤 ${p.nom_participant}</td>
                     </tr>
                 `;
             });
         }
+
+        // Préparation du lien WhatsApp automatique
+        const messageWhatsApp = encodeURIComponent(`Salut ! Rejoins ma tontine "${cercle.nom_cercle}" (${cercle.montant_cotisation} FCFA/mois) en cliquant ici : https://tontine-mvp.onrender.com/rejoindre/${code}`);
+        const lienWhatsApp = `https://wa.me/?text=${messageWhatsApp}`;
 
         res.send(`
             <!DOCTYPE html>
@@ -184,34 +184,35 @@ app.get('/cercle/:code', async (req, res) => {
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
                 <title>Membres du cercle</title>
                 <style>
-                    body { font-family: Arial, sans-serif; text-align: center; background-color: #f4f4f9; padding: 20px; }
-                    .card { background: white; padding: 25px; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); display: inline-block; max-width: 500px; width: 100%; text-align: left; }
-                    h1 { color: #2ecc71; text-align: center; margin-bottom: 5px; }
+                    body { font-family: Arial, sans-serif; text-align: center; background-color: #f4f4f9; padding: 15px; margin: 0; }
+                    .card { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); display: inline-block; max-width: 450px; width: 100%; box-sizing: border-box; text-align: left; margin-top: 10px; }
+                    h1 { color: #2ecc71; text-align: center; margin-top: 0; font-size: 24px; }
                     .subtitle { text-align: center; color: #7f8c8d; margin-bottom: 20px; font-size: 14px; }
-                    .info-box { background: #e8f8f5; padding: 15px; border-radius: 5px; margin-bottom: 20px; border-left: 5px solid #2ecc71; }
-                    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-                    th, td { padding: 12px; border-bottom: 1px solid #ddd; text-align: left; }
-                    th { background-color: #f8f9fa; color: #2c3e50; }
-                    .btn-back { display: block; text-align: center; background: #34495e; color: white; text-decoration: none; padding: 10px; border-radius: 5px; margin-top: 20px; font-weight: bold; }
+                    .info-box { background: #e8f8f5; padding: 15px; border-radius: 8px; margin-bottom: 20px; border-left: 5px solid #2ecc71; font-size: 15px; line-height: 1.5; }
+                    table { width: 100%; border-collapse: collapse; margin-top: 10px; background: #fff; }
+                    th, td { padding: 12px 10px; border-bottom: 1px solid #edf2f7; text-align: left; font-size: 15px; }
+                    th { background-color: #f7fafc; color: #4a5568; font-weight: bold; }
+                    .btn-whatsapp { display: block; text-align: center; background: #25D366; color: white; text-decoration: none; padding: 12px; border-radius: 6px; margin-top: 25px; font-weight: bold; font-size: 16px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+                    .btn-back { display: block; text-align: center; color: #718096; text-decoration: none; padding: 10px; margin-top: 10px; font-size: 14px; }
                 </style>
             </head>
             <body>
                 <div class="card">
                     <h1>📊 Tableau de bord</h1>
-                    <div class="subtitle">Code de l'invitation : <strong>${code}</strong></div>
+                    <div class="subtitle">Code d'invitation : <strong>${code}</strong></div>
                     
                     <div class="info-box">
                         🎯 Tontine : <strong>${cercle.nom_cercle}</strong><br>
                         💰 Cotisation : <strong>${cercle.montant_cotisation} FCFA / mois</strong><br>
-                        👥 Nombre de membres : <strong>${participants.length}</strong>
+                        👥 Membres inscrits : <strong>${participants.length}</strong>
                     </div>
 
-                    <h3>👥 Membres inscrits :</h3>
+                    <h3 style="color: #2d3748; margin-bottom: 10px; font-size: 16px;">👥 Membres de ce cercle :</h3>
                     <table>
                         <thead>
                             <tr>
-                                <th style="width: 50px;">N°</th>
-                                * Prénom / Nom</th>
+                                <th>N°</th>
+                                <th>Prénom / Nom</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -219,6 +220,7 @@ app.get('/cercle/:code', async (req, res) => {
                         </tbody>
                     </table>
 
+                    <a class="btn-whatsapp" href="${lienWhatsApp}" target="_blank">🟢 Inviter des membres via WhatsApp</a>
                     <a class="btn-back" href="/rejoindre/${code}">← Retour à la page d'inscription</a>
                 </div>
             </body>
