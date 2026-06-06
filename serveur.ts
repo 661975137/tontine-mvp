@@ -10,7 +10,7 @@ const pool = new Pool({
     ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
 });
 
-// Page d'accueil : Création de tontine
+// Accueil
 app.get('/', (req, res) => {
     res.send(`
         <!DOCTYPE html>
@@ -77,7 +77,7 @@ app.post('/creer-cercle', async (req, res) => {
     } catch (err) { res.status(500).json({ error: "Erreur" }); }
 });
 
-// Page d'inscription pour rejoindre
+// Page d'inscription avec étape de paiement
 app.get('/rejoindre/:code', async (req, res) => {
     const code = req.params.code;
     try {
@@ -90,13 +90,7 @@ app.get('/rejoindre/:code', async (req, res) => {
         const placesDisponibles = cercle.limite_participants - nbInscrits;
 
         if (placesDisponibles <= 0) {
-            return res.send(`
-                <div style="font-family:Arial; text-align:center; padding:50px;">
-                    <h1>🛑 Désolé, cette tontine est complète !</h1>
-                    <p>Le nombre maximum de <strong>${cercle.limite_participants} participants</strong> a été atteint.</p>
-                    <br><a href="/cercle/${code}" style="color:#3498db; text-decoration:none;">📊 Voir le tableau de bord</a>
-                </div>
-            `);
+            return res.send(`<div style="font-family:Arial; text-align:center; padding:50px;"><h1>🛑 Tontine complète !</h1><br><a href="/cercle/${code}">📊 Voir le tableau de bord</a></div>`);
         }
 
         res.send(`
@@ -104,51 +98,83 @@ app.get('/rejoindre/:code', async (req, res) => {
             <html lang="fr">
             <head>
                 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>Rejoindre et Payer</title>
+                <title>Rejoindre la tontine</title>
                 <style>
                     body { font-family: Arial, sans-serif; text-align: center; background-color: #f4f4f9; padding: 20px; }
                     .card { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); display: inline-block; max-width: 400px; width: 100%; text-align: left; box-sizing: border-box; }
                     input { width: 100%; padding: 12px; margin: 15px 0; border: 1px solid #ccc; border-radius: 5px; box-sizing: border-box; font-size: 16px; }
                     button { background-color: #2980b9; color: white; border: none; padding: 14px; border-radius: 5px; font-weight: bold; width: 100%; font-size: 16px; cursor: pointer; }
                     .price-box { background: #fef9e7; border-left: 5px solid #f1c40f; padding: 10px; margin-bottom: 15px; border-radius: 4px; }
+                    .step-2 { display: none; background: #e8f8f5; padding: 15px; border-radius: 6px; border-left: 5px solid #2ecc71; margin-top: 15px; }
                 </style>
             </head>
             <body>
                 <div class="card">
-                    <h1 style="text-align:center; color:#2980b9; margin-top:0;">👋 Inscription</h1>
-                    <p>Cercle : <strong>${cercle.nom_cercle}</strong></p>
-                    
-                    <div class="price-box">
-                        💰 Cotisation de base : <strong>${cercle.montant_cotisation} FCFA</strong><br>
-                        ⚡ Frais de traitement (1%) : <strong>${Math.round(cercle.montant_cotisation * 0.01)} FCFA</strong><br>
-                        🛒 Total à payer : <strong style="color:#e67e22;">${Math.round(cercle.montant_cotisation * 1.01)} FCFA</strong>
+                    <div id="form-container">
+                        <h1 style="text-align:center; color:#2980b9; margin-top:0;">👋 Inscription</h1>
+                        <p>Cercle : <strong>${cercle.nom_cercle}</strong></p>
+                        
+                        <div class="price-box">
+                            💰 Cotisation : <strong>${cercle.montant_cotisation} FCFA</strong><br>
+                            ⚡ Frais (1%) : <strong>${Math.round(cercle.montant_cotisation * 0.01)} FCFA</strong><br>
+                            🛒 Total : <strong style="color:#e67e22;">${Math.round(cercle.montant_cotisation * 1.01)} FCFA</strong>
+                        </div>
+                        
+                        <label for="prenom" style="font-weight:bold;">Ton prénom :</label>
+                        <input type="text" id="prenom" placeholder="Entre ton prénom ici...">
+                        <button onclick="genererRecu()">Generer ma demande de paiement</button>
                     </div>
 
-                    <p>👥 Places disponibles : <strong>${placesDisponibles} / ${cercle.limite_participants}</strong></p>
-                    
-                    <label for="prenom" style="font-weight:bold;">Ton prénom :</label>
-                    <input type="text" id="prenom" placeholder="Entre ton prénom ici..." required>
-                    
-                    <button onclick="preparerPaiement()">💳 Valider et Payer via Wave</button>
+                    <div id="payment-container" class="step-2">
+                        <h3 style="color:#27ae60; margin-top:0;">📋 Étape Finale : Paiement</h3>
+                        <p>1️⃣ Clique sur le bouton bleu ci-dessous pour ouvrir Wave.<br>
+                        2️⃣ **IMPORTANT** : Ajoute ce code exact dans les notes Wave de ton transfert : <br>
+                        <span style="font-size:20px; font-weight:bold; color:#e74c3c; display:block; text-align:center; margin:10px 0;" id="display-cle"></span></p>
+                        
+                        <button style="background:#25D366; margin-bottom:10px;" onclick="ouvrirWave()">📱 Ouvrir l'application Wave</button>
+                        <button style="background:#34495e;" onclick="verifierStatut()">🔄 J'ai payé, vérifier mon reçu</button>
+                    </div>
                 </div>
+
                 <script>
-                    function pairesDeClefs(nom, code) {
-                        return 'nom=' + encodeURIComponent(nom) + '&code=' + encodeURIComponent(code);
-                    }
-                    function preparerPaiement() {
+                    let codeRecuGlobal = '';
+                    let prenomGlobal = '';
+
+                    async function genererRecu() {
                         const prenom = document.getElementById('prenom').value.trim();
                         if(!prenom) return alert("Mets ton prénom !");
                         
+                        const res = await fetch('/generer-recu', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ nom: prenom, code: '${code}' })
+                        });
+                        const data = await res.json();
+                        if(data.success) {
+                            codeRecuGlobal = data.cleRecu;
+                            prenomGlobal = prenom;
+                            document.getElementById('display-cle').innerText = data.cleRecu;
+                            document.getElementById('form-container').style.display = 'none';
+                            document.getElementById('payment-container').style.display = 'block';
+                        } else {
+                            alert(data.error);
+                        }
+                    }
+
+                    function ouvrirWave() {
                         const total = ${Math.round(cercle.montant_cotisation * 1.01)};
-                        // Simulation du retour Wave vers notre route de confirmation
-                        const urlRetour = window.location.origin + '/paiement-reussi?' + pairesDeClefs(prenom, '${code}');
-                        
-                        alert("👉 Redirection vers Wave pour régler " + total + " FCFA.");
                         window.location.href = "https://pay.wave.com/m/M_keWb8PBIy-lU/c/ci/?amount=" + total;
-                        
-                        // Note pour le MVP : Comme l'URL Wave externe ne gère pas de webhook de retour réel sans API marchande, 
-                        // on simule la redirection réussie après 3 secondes pour l'expérience utilisateur sur mobile.
-                        setTimeout(() => { window.location.href = urlRetour; }, 3000);
+                    }
+
+                    async function verifierStatut() {
+                        const res = await fetch('/verifier-recu?cle=' + codeRecuGlobal);
+                        const data = await res.json();
+                        if(data.statut === 'Valide') {
+                            alert("🎉 Paiement confirmé ! Bienvenue dans la tontine.");
+                            window.location.href = '/cercle/${code}';
+                        } else {
+                            alert("⏳ Reçu toujours en attente de validation par l'administrateur. Réessaie dans un instant.");
+                        }
                     }
                 </script>
             </body>
@@ -157,29 +183,97 @@ app.get('/rejoindre/:code', async (req, res) => {
     } catch (err) { res.status(500).send("Erreur"); }
 });
 
-// 🌟 NOUVELLE ROUTE : Enregistre le membre UNIQUEMENT après le paiement Wave
-app.get('/paiement-reussi', async (req, res) => {
-    const nom = req.query.nom as string;
-    const code = req.query.code as string;
-
-    if (!nom || !code) return res.status(400).send("Paramètres invalides");
-
+// API : Générer un reçu temporaire
+app.post('/generer-recu', async (req, res) => {
+    const { nom, code } = req.body;
+    const cleRecu = 'REC-' + Math.floor(1000 + Math.random() * 9000);
     try {
         const check = await pool.query('SELECT * FROM participants WHERE UPPER(nom_participant) = UPPER($1) AND code_invitation = $2', [nom, code]);
-        if (check.rows.length === 0) {
-            await pool.query('INSERT INTO participants (nom_participant, code_invitation) VALUES ($1, $2)', [nom, code]);
-        }
-        res.send(`
-            <div style="font-family:Arial; text-align:center; padding:50px;">
-                <h1 style="color:#2ecc71;">✅ Paiement Wave validé !</h1>
-                <p>Merci ${nom}, ton inscription a été enregistrée avec succès.</p>
-                <br><br>
-                <a href="/cercle/${code}" style="background:#2ecc71; color:white; padding:12px 20px; border-radius:5px; text-decoration:none; font-weight:bold;">📊 Aller au Tableau de bord</a>
-            </div>
-        `);
-    } catch (err) { res.status(500).send("Erreur lors de la validation"); }
+        if (check.rows.length > 0) return res.status(400).json({ error: "Prénom déjà inscrit !" });
+
+        await pool.query('INSERT INTO recus_paiement (nom_participant, code_invitation, cle_recu) VALUES ($1, $2, $3)', [nom, code, cleRecu]);
+        res.json({ success: true, cleRecu });
+    } catch (err) { res.status(500).json({ error: "Erreur" }); }
 });
 
+// API : Vérifier l'état du reçu
+app.get('/verifier-recu', async (req, res) => {
+    const { cle } = req.query;
+    try {
+        const result = await pool.query('SELECT statut FROM recus_paiement WHERE cle_recu = $1', [cle]);
+        if(result.rows.length === 0) return res.json({ statut: 'Inconnu' });
+        res.json({ statut: result.rows[0].statut });
+    } catch (err) { res.status(500).json({ error: "Erreur" }); }
+});
+
+// 🌟 INTERFACE SECRÈTE ADMIN : Pour valider les paiements reçus sur ton compte Wave
+app.get('/admin-validation', async (req, res) => {
+    try {
+        const result = await pool.query("SELECT * FROM recus_paiement WHERE statut = 'En attente' ORDER BY id DESC");
+        let lignes = '';
+        result.rows.forEach(r => {
+            lignes += `
+                <tr>
+                    <td>${r.nom_participant}</td>
+                    <td><strong style="color:#e74c3c;">${r.cle_recu}</strong></td>
+                    <td><button onclick="validerPaiement('${r.cle_recu}', '${r.nom_participant}', '${r.code_invitation}')" style="background:#2ecc71; color:white; border:none; padding:8px; border-radius:4px; cursor:pointer;">✅ Confirmer la réception Wave</button></td>
+                </tr>
+            `;
+        });
+
+        res.send(`
+            <!DOCTYPE html>
+            <html lang="fr">
+            <head>
+                <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Espace Validation Admin</title>
+                <style>
+                    body { font-family: Arial; background:#f4f4f9; padding:20px; text-align:center; }
+                    .card { background:white; padding:20px; border-radius:8px; box-shadow:0 2px 10px rgba(0,0,0,0.1); inline-block; width:100%; max-width:600px; display:inline-block; text-align:left; }
+                    table { width:100%; border-collapse:collapse; margin-top:15px; }
+                    th, td { padding:12px; border-bottom:1px solid #ddd; text-align:left; }
+                    th { background:#f7fafc; }
+                </style>
+            </head>
+            <body>
+                <div class="card">
+                    <h2>🔑 Validation des Dépôts Tontine</h2>
+                    <p>Vérifie ton application Wave. Dès que tu vois un transfert avec une note correspondante, clique sur le bouton vert pour valider l'accès du membre.</p>
+                    <table>
+                        <thead><tr><th>Candidat</th><th>Code Attendu</th><th>Action</th></tr></thead>
+                        <tbody>${lignes || '<tr><td colspan="3" style="text-align:center; color:grey;">Aucun dépôt en attente.</td></tr>'}</tbody>
+                    </table>
+                </div>
+                <script>
+                    async function validerPaiement(cle, nom, code) {
+                        const res = await fetch('/admin-confirmer', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ cle, nom, code })
+                        });
+                        const data = await res.json();
+                        if(data.success) { alert("Membre validé !"); window.location.reload(); }
+                    }
+                </script>
+            </body>
+            </html>
+        `);
+    } catch (err) { res.status(500).send("Erreur"); }
+});
+
+// API : Traitement de la validation Admin
+app.post('/admin-confirmer', async (req, res) => {
+    const { cle, nom, code } = req.body;
+    try {
+        // 1. Passer le reçu à Valide
+        await pool.query("UPDATE recus_paiement SET statut = 'Valide' WHERE cle_recu = $1", [cle]);
+        // 2. Inscrire officiellement le membre dans la tontine
+        await pool.query('INSERT INTO participants (nom_participant, code_invitation) VALUES ($1, $2)', [nom, code]);
+        res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: "Erreur" }); }
+});
+
+// Tirage au sort
 app.post('/lancer-tirage/:code', async (req, res) => {
     const code = req.params.code;
     try {
@@ -198,6 +292,7 @@ app.post('/lancer-tirage/:code', async (req, res) => {
     } catch (err) { res.status(500).json({ error: "Erreur" }); }
 });
 
+// Tableau de bord
 app.get('/cercle/:code', async (req, res) => {
     const code = req.params.code;
     try {
