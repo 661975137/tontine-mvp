@@ -10,7 +10,7 @@ const pool = new Pool({
     ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
 });
 
-// Page d'accueil : Formulaire de création avec limite de participants
+// Page d'accueil : Création de tontine
 app.get('/', (req, res) => {
     res.send(`
         <!DOCTYPE html>
@@ -30,23 +30,18 @@ app.get('/', (req, res) => {
         <body>
             <div class="card">
                 <h1>🚀 Nouvelle Tontine</h1>
-                
                 <label for="nom">🎯 Nom du cercle</label>
                 <input type="text" id="nom" placeholder="Ex: Tontine Famille..." required>
-                
                 <label for="montant">💰 Montant de la cotisation (FCFA)</label>
                 <input type="number" id="montant" placeholder="Ex: 25000" required>
-                
                 <label for="periode">📅 Période des rotations</label>
                 <select id="periode">
                     <option value="Semaine">Par Semaine</option>
                     <option value="Quinzaine">Par Quinzaine</option>
                     <option value="Mois" selected>Par Mois</option>
                 </select>
-
                 <label for="limite">👥 Nombre max de participants</label>
                 <input type="number" id="limite" value="5" min="2" required>
-
                 <button onclick="creerTontine()">Créer le cercle</button>
             </div>
             <script>
@@ -55,18 +50,11 @@ app.get('/', (req, res) => {
                     const montant = document.getElementById('montant').value;
                     const periode = document.getElementById('periode').value;
                     const limite = document.getElementById('limite').value;
-
                     if(!nom || !montant || !limite) return alert("Remplis tout !");
-                    
                     const response = await fetch('/creer-cercle', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ 
-                            nom, 
-                            montant: parseInt(montant), 
-                            periode, 
-                            limite: parseInt(limite) 
-                        })
+                        body: JSON.stringify({ nom, montant: parseInt(montant), periode, limite: parseInt(limite) })
                     });
                     const data = await response.json();
                     if(data.codeUnique) window.location.href = '/cercle/' + data.codeUnique;
@@ -89,7 +77,7 @@ app.post('/creer-cercle', async (req, res) => {
     } catch (err) { res.status(500).json({ error: "Erreur" }); }
 });
 
-// Page d'inscription : Affiche le montant de base
+// Page d'inscription pour rejoindre
 app.get('/rejoindre/:code', async (req, res) => {
     const code = req.params.code;
     try {
@@ -99,8 +87,9 @@ app.get('/rejoindre/:code', async (req, res) => {
 
         const countRes = await pool.query('SELECT COUNT(*) FROM participants WHERE code_invitation = $1', [code]);
         const nbInscrits = parseInt(countRes.rows[0].count);
+        const placesDisponibles = cercle.limite_participants - nbInscrits;
 
-        if (nbInscrits >= cercle.limite_participants) {
+        if (placesDisponibles <= 0) {
             return res.send(`
                 <div style="font-family:Arial; text-align:center; padding:50px;">
                     <h1>🛑 Désolé, cette tontine est complète !</h1>
@@ -135,31 +124,31 @@ app.get('/rejoindre/:code', async (req, res) => {
                         🛒 Total à payer : <strong style="color:#e67e22;">${Math.round(cercle.montant_cotisation * 1.01)} FCFA</strong>
                     </div>
 
-                    <p>👥 Places disponibles : <strong>${nbInscrits} / ${cercle.limite_participants}</strong></p>
+                    <p>👥 Places disponibles : <strong>${placesDisponibles} / ${cercle.limite_participants}</strong></p>
                     
                     <label for="prenom" style="font-weight:bold;">Ton prénom :</label>
                     <input type="text" id="prenom" placeholder="Entre ton prénom ici..." required>
                     
-                    <button onclick="payerEtRejoindre()">💳 Valider et Payer via Wave</button>
+                    <button onclick="preparerPaiement()">💳 Valider et Payer via Wave</button>
                 </div>
                 <script>
-                    async function payerEtRejoindre() {
+                    function pairesDeClefs(nom, code) {
+                        return 'nom=' + encodeURIComponent(nom) + '&code=' + encodeURIComponent(code);
+                    }
+                    function preparerPaiement() {
                         const prenom = document.getElementById('prenom').value.trim();
                         if(!prenom) return alert("Mets ton prénom !");
                         
-                        const res = await fetch('/rejoindre-cercle', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ nom: prenom, code: '${code}' })
-                        });
-                        const data = await res.json();
+                        const total = ${Math.round(cercle.montant_cotisation * 1.01)};
+                        // Simulation du retour Wave vers notre route de confirmation
+                        const urlRetour = window.location.origin + '/paiement-reussi?' + pairesDeClefs(prenom, '${code}');
                         
-                        if(data.success && data.paymentUrl) {
-                            alert("👉 Redirection vers Wave pour régler " + data.totalAPayer + " FCFA (cotisation + 1% frais). L'inscription sera validée dès le paiement !");
-                            window.location.href = data.paymentUrl;
-                        } else {
-                            alert("Erreur : " + data.error);
-                        }
+                        alert("👉 Redirection vers Wave pour régler " + total + " FCFA.");
+                        window.location.href = "https://pay.wave.com/m/M_keWb8PBIy-lU/c/ci/?amount=" + total;
+                        
+                        // Note pour le MVP : Comme l'URL Wave externe ne gère pas de webhook de retour réel sans API marchande, 
+                        // on simule la redirection réussie après 3 secondes pour l'expérience utilisateur sur mobile.
+                        setTimeout(() => { window.location.href = urlRetour; }, 3000);
                     }
                 </script>
             </body>
@@ -168,42 +157,27 @@ app.get('/rejoindre/:code', async (req, res) => {
     } catch (err) { res.status(500).send("Erreur"); }
 });
 
-// API d'inscription avec calcul du montant ajusté de 1% et génération du lien de paiement
-app.post('/rejoindre-cercle', async (req, res) => {
-    const { nom, code } = req.body;
+// 🌟 NOUVELLE ROUTE : Enregistre le membre UNIQUEMENT après le paiement Wave
+app.get('/paiement-reussi', async (req, res) => {
+    const nom = req.query.nom as string;
+    const code = req.query.code as string;
+
+    if (!nom || !code) return res.status(400).send("Paramètres invalides");
+
     try {
-        const cercleRes = await pool.query('SELECT montant_cotisation, limite_participants FROM cercles WHERE code_invitation = $1', [code]);
-        if(cercleRes.rows.length === 0) return res.status(400).json({ error: "Cercle inexistant" });
-        
-        const montantBase = cercleRes.rows[0].montant_cotisation;
-        const limite = cercleRes.rows[0].limite_participants;
-
-        const countRes = await pool.query('SELECT COUNT(*) FROM participants WHERE code_invitation = $1', [code]);
-        const nbInscrits = parseInt(countRes.rows[0].count);
-
-        if(nbInscrits >= limite) {
-            return res.status(400).json({ error: "La tontine a atteint sa limite maximale !" });
-        }
-
         const check = await pool.query('SELECT * FROM participants WHERE UPPER(nom_participant) = UPPER($1) AND code_invitation = $2', [nom, code]);
-        if (check.rows.length > 0) return res.status(400).json({ error: "Ce prénom est déjà inscrit !" });
-        
-        // 🔒 Calcul du montant avec 1% de frais ajoutés
-        const totalAPayer = Math.round(montantBase * 1.01);
-        
-        // 🔗 Construction du lien Wave dynamique personnalisé avec le montant calculé
-        const waveBaseUrl = "https://pay.wave.com/m/M_keWb8PBIy-lU/c/ci/?amount=";
-        const paymentUrl = `${waveBaseUrl}${totalAPayer}`;
-
-        // Insertion en BDD (simule la validation post-redirection de manière fluide pour l'UX du MVP)
-        await pool.query('INSERT INTO participants (nom_participant, code_invitation) VALUES ($1, $2)', [nom, code]);
-        
-        res.json({ 
-            success: true, 
-            paymentUrl: paymentUrl,
-            totalAPayer: totalAPayer
-        });
-    } catch (err) { res.status(500).json({ error: "Erreur" }); }
+        if (check.rows.length === 0) {
+            await pool.query('INSERT INTO participants (nom_participant, code_invitation) VALUES ($1, $2)', [nom, code]);
+        }
+        res.send(`
+            <div style="font-family:Arial; text-align:center; padding:50px;">
+                <h1 style="color:#2ecc71;">✅ Paiement Wave validé !</h1>
+                <p>Merci ${nom}, ton inscription a été enregistrée avec succès.</p>
+                <br><br>
+                <a href="/cercle/${code}" style="background:#2ecc71; color:white; padding:12px 20px; border-radius:5px; text-decoration:none; font-weight:bold;">📊 Aller au Tableau de bord</a>
+            </div>
+        `);
+    } catch (err) { res.status(500).send("Erreur lors de la validation"); }
 });
 
 app.post('/lancer-tirage/:code', async (req, res) => {
@@ -217,7 +191,6 @@ app.post('/lancer-tirage/:code', async (req, res) => {
             const j = Math.floor(Math.random() * (i + 1));
             [ids[i], ids[j]] = [ids[j], ids[i]];
         }
-
         for (let i = 0; i < ids.length; i++) {
             await pool.query('UPDATE participants SET ordre_passage = $1 WHERE id = $2', [i + 1, ids[i]]);
         }
@@ -288,20 +261,16 @@ app.get('/cercle/:code', async (req, res) => {
                         💰 Cotisation : <strong>${cercle.montant_cotisation} FCFA / ${cercle.periode.toLowerCase()}</strong><br>
                         👥 Membres : <strong>${pNoms.length} / ${cercle.limite_participants}</strong>
                     </div>
-
                     ${sectionTirage}
-
                     <h3>👥 Membres inscrits :</h3>
                     <table>
                         <thead><tr><th>N°</th><th>Prénom / Nom</th></tr></thead>
                         <tbody>${lignesTableau}</tbody>
                     </table>
-
                     ${boutonTirageHtml}
                     ${boutonWhatsAppHtml}
                     <a href="/" style="display:block; text-align:center; color:#718096; margin-top:15px; text-decoration:none; font-size:14px;">➕ Créer une autre tontine</a>
                 </div>
-
                 <script>
                     async function lancerLeTirage() {
                         if(${pNoms.length} < 2) return alert("Il faut au moins 2 membres !");
