@@ -2,14 +2,16 @@ const express = require('express');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Configuration pour lire les données des formulaires
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // ==========================================
-// CONFIGURATION DE TON LIEN MARCHAND WAVE OFFICIEL
+// CONFIGURATION DE TON COMPTE WAVE
 // ==========================================
 const BASE_LIEN_WAVE = "https://pay.wave.com/m/M_keWb8PBIy-lU/c/ci/?amount=";
+
+// Simulation d'une base de données de transactions en attente
+let transactionsEnAttente = [];
 
 let tontineDonnees = {
     nom: "KNACOM Tontine Élite",
@@ -41,17 +43,11 @@ app.get('/', (req, res) => {
             .amount-main { font-size: 28px; font-weight: bold; color: #1c75bc; }
             .details-list { list-style: none; padding: 0; margin: 15px 0; }
             .details-item { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px dashed #e0e0e0; font-size: 15px; }
-            
-            /* Style exclusif bouton Wave officiel */
             .btn-wave { display: block; width: 100%; background: #1ac6ff; color: white; border: none; padding: 15px; border-radius: 10px; font-size: 16px; font-weight: bold; cursor: pointer; text-align: center; text-decoration: none; box-shadow: 0 4px 10px rgba(26, 198, 255, 0.3); box-sizing: border-box; }
-            .btn-wave:active { transform: scale(0.98); }
-            
-            .whatsapp-card { background: #ffffff; border-radius: 16px; padding: 20px; text-align: center; box-shadow: 0 4px 12px rgba(0,0,0,0.05); border-left: 5px solid #25D366; }
-            .btn-whatsapp { display: inline-flex; align-items: center; justify-content: center; background: #25D366; color: white; text-decoration: none; padding: 14px 24px; font-weight: bold; border-radius: 10px; font-size: 15px; box-shadow: 0 4px 12px rgba(37, 211, 102, 0.3); margin-top: 10px; width: 85%; }
+            .btn-admin { display: block; text-align: center; margin-top: 15px; color: #7f8c8d; font-size: 13px; text-decoration: none; }
         </style>
     </head>
     <body>
-
         <div class="header">
             <h1 class="brand-title">🪙 KNACOM FinTech</h1>
             <p style="color: #7f8c8d; margin: 5px 0 20px 0;">Paiement Sécurisé Wave</p>
@@ -59,54 +55,58 @@ app.get('/', (req, res) => {
 
         <div class="card">
             <h2 style="margin-top: 0; font-size: 18px; color: #2c3e50;">${tontineDonnees.nom}</h2>
-            
             <div class="amount-box">
-                <span style="font-size: 13px; color: #7f8c8d; display: block;">TOTAL À PAYER (Adhésion incluse)</span>
+                <span style="font-size: 13px; color: #7f8c8d; display: block;">TOTAL À PAYER</span>
                 <span class="amount-main">${totalAcaisser.toLocaleString()} FCFA</span>
             </div>
-
             <ul class="details-list">
-                <li class="details-item">
-                    <span>Montant de la Cotisation</span>
-                    <strong>${tontineDonnees.cotisation.toLocaleString()} FCFA</strong>
-                </li>
-                <li class="details-item" style="color: #e67e22;">
-                    <span>Frais d'Adhésion (Unique)</span>
-                    <strong>+ ${tontineDonnees.fraisAdhesion.toLocaleString()} FCFA</strong>
-                </li>
-                <li class="details-item">
-                    <span>Frais de Service plateforme</span>
-                    <strong>+ ${tontineDonnees.fraisService.toLocaleString()} FCFA</strong>
-                </li>
+                <li class="details-item"><span>Montant de la Cotisation</span><strong>${tontineDonnees.cotisation.toLocaleString()} FCFA</strong></li>
+                <li class="details-item" style="color: #e67e22;"><span>Frais d'Adhésion (Unique)</span><strong>+ ${tontineDonnees.fraisAdhesion.toLocaleString()} FCFA</strong></li>
+                <li class="details-item"><span>Frais de Service</span><strong>+ ${tontineDonnees.fraisService.toLocaleString()} FCFA</strong></li>
             </ul>
 
             <form action="/passerelle-wave" method="POST">
                 <input type="hidden" name="montantTotal" value="${totalAcaisser}">
-                <button type="submit" class="btn-wave">🌊 Payer instantanément avec Wave</button>
+                <button type="submit" class="btn-wave">🌊 Payer avec Wave</button>
             </form>
         </div>
 
-        <div class="whatsapp-card">
-            <div style="font-size: 35px; margin-bottom: 5px;">💬</div>
-            <h3 style="margin: 0 0 8px 0; color: #2c3e50; font-size: 18px;">Groupe Officiel de Suivi</h3>
-            <a href="https://chat.whatsapp.com/Hmu9NxIEPidIWDBTx7snEs" target="_blank" class="btn-whatsapp">
-                🔗 Rejoindre le Groupe WhatsApp
-            </a>
-        </div>
-
+        <a href="/gerant-dashboard" class="btn-admin">⚙️ Espace Gestionnaire (Vérification)</a>
     </body>
     </html>
     `);
 });
 
 // ==========================================
-// 2. PASSERELLE DE REDIRECTION VERS TON LIEN MARCHAND
+// 2. REDIRECTION ET ENREGISTREMENT TRANSACTION
 // ==========================================
 app.post('/passerelle-wave', (req, res) => {
     const montant = req.body.montantTotal;
-    
-    // Concaténation dynamique de ton lien marchand avec le montant exact
+    const txnId = "KNM-" + Math.floor(1000 + Math.random() * 9000);
+
+    // Enregistrement de la transaction en attente de validation par le gérant
+    transactionsEnAttente.push({
+        id: txnId,
+        montant: montant,
+        statut: "En cours de vérification"
+    });
+
     const lienFinalWave = `${BASE_LIEN_WAVE}${montant}`;
+
+    res.send(`
+    <script>
+        // Ouvre Wave immédiatement pour le paiement, puis redirige vers l'écran de vérification
+        window.open("${lienFinalWave}", "_blank");
+        window.location.href = "/verification-paiement?id=${txnId}";
+    </script>
+    `);
+});
+
+// ==========================================
+// 3. ÉCRAN DE VÉRIFICATION AVEC COMPTE À REBOURS (Style Capture 483431)
+// ==========================================
+app.get('/verification-paiement', (req, res) => {
+    const txnId = req.query.id;
 
     res.send(`
     <!DOCTYPE html>
@@ -114,46 +114,135 @@ app.post('/passerelle-wave', (req, res) => {
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Redirection Wave...</title>
+        <title>Vérification du paiement</title>
         <style>
-            body { font-family: Arial, sans-serif; text-align: center; padding: 40px 20px; background: #f4f6f9; color: #2c3e50; }
-            .wave-box { background: white; padding: 30px; border-radius: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); max-width: 400px; margin: 40px auto; }
-            .logo-wave { font-size: 60px; color: #1ac6ff; margin-bottom: 15px; }
-            .btn-trigger { display: block; background: #1ac6ff; color: white; text-decoration: none; padding: 15px; border-radius: 10px; font-weight: bold; margin: 25px 0; font-size: 16px; box-shadow: 0 4px 10px rgba(26, 198, 255, 0.3); }
-            .loader { border: 4px solid #f3f3f3; border-top: 4px solid #1ac6ff; border-radius: 50%; width: 35px; height: 35px; animation: spin 1s linear infinite; margin: 15px auto; }
-            @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; text-align: center; background: #ffffff; padding: 40px 20px; margin: 0; color: #333; }
+            .title { font-size: 18px; color: #1e272e; font-weight: 500; margin-bottom: 30px; }
+            .timer { font-size: 60px; font-weight: bold; margin-bottom: 40px; color: #000000; letter-spacing: 2px; }
+            .msg-box { background: #f1f2f6; border-radius: 6px; padding: 20px; text-align: left; font-size: 16px; line-height: 1.5; color: #2f3542; max-width: 400px; margin: 0 auto 50px auto; }
+            .btn-verify { display: block; width: 100%; max-width: 400px; background: #f15a24; color: white; border: none; padding: 16px; font-size: 16px; font-weight: bold; border-radius: 12px; cursor: pointer; text-decoration: none; margin: 0 auto; box-sizing: border-box; }
         </style>
     </head>
     <body>
 
-        <div class="wave-box">
-            <div class="logo-wave">🌊</div>
-            <h2>Ouverture de Wave...</h2>
-            <p>Montant à régler : <strong style="color:#1c75bc; font-size: 22px;">${parseInt(montant).toLocaleString()} FCFA</strong></p>
-            
-            <div class="loader"></div>
-            
-            <a href="${lienFinalWave}" id="waveLink" class="btn-trigger">🚀 Cliquer ici si rien ne se passe</a>
-            
-            <p style="font-size: 13px; color: #7f8c8d; margin-top: 20px;">
-                Vous allez être redirigé vers l'application sécurisée Wave pour valider la transaction. Après le paiement, revenez dans cette application.
-            </p>
+        <div class="title">Vérification du paiement</div>
+        
+        <div class="timer" id="countdown">05:00</div>
+
+        <div class="msg-box">
+            Le paiement est en cours de verification chez l'operateur,<br>veuillez patienter
         </div>
 
+        <button class="btn-verify" onclick="verifierStatut()">Vérifier votre paiement</button>
+
         <script>
-            // Déclenchement automatique du Deep Link dès le chargement de l'écran
-            window.onload = function() {
-                setTimeout(() => {
-                    window.location.href = "${lienFinalWave}";
-                }, 1000);
-            };
+            let temps = 300; // 5 minutes en secondes
+            const timerElement = document.getElementById('countdown');
+
+            const interval = setInterval(() => {
+                let minutes = parseInt(temps / 60, 10);
+                let secondes = parseInt(temps % 60, 10);
+
+                minutes = minutes < 10 ? "0" + minutes : minutes;
+                secondes = secondes < 10 ? "0" + secondes : secondes;
+
+                timerElement.textContent = minutes + ":" + secondes;
+
+                if (--temps < 0) {
+                    clearInterval(interval);
+                    timerElement.textContent = "00:00";
+                }
+            }, 1000);
+
+            function verifierStatut() {
+                // Requête pour voir si le gérant a validé
+                fetch('/statut-transaction?id=${txnId}')
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.statut === "Validé") {
+                            alert("✅ Votre paiement a été validé avec succès par le gérant !");
+                            window.location.href = "/";
+                        } else {
+                            alert("⏳ Le gérant n'a pas encore validé votre dépôt Wave. Veuillez patienter.");
+                        }
+                    });
+            }
         </script>
     </body>
     </html>
     `);
 });
 
-// Démarrage du serveur
+// Route API pour vérifier le statut depuis le téléphone du participant
+app.get('/statut-transaction', (req, res) => {
+    const txnId = req.query.id;
+    const txn = transactionsEnAttente.find(t => t.id === txnId);
+    res.json({ statut: txn ? txn.statut : "Inconnu" });
+});
+
+// ==========================================
+// 4. ESPACE GÉRANT : POUR VALIDER LES ENCAISSEMENTS WAVE
+// ==========================================
+app.get('/gerant-dashboard', (req, res) => {
+    let lignesTableau = transactionsEnAttente.map(t => `
+        <tr>
+            <td style="padding:10px; border-bottom:1px solid #ddd;">${t.id}</td>
+            <td style="padding:10px; border-bottom:1px solid #ddd;"><b>${parseInt(t.montant).toLocaleString()} FCFA</b></td>
+            <td style="padding:10px; border-bottom:1px solid #ddd; color: ${t.statut === 'Validé' ? 'green' : 'orange'}">${t.statut}</td>
+            <td style="padding:10px; border-bottom:1px solid #ddd;">
+                ${t.statut === 'En cours de vérification' ? `<a href="/valider-txn?id=${t.id}" style="background:#2ecc71; color:white; padding:5px 10px; text-decoration:none; border-radius:4px; font-size:12px;">Valider l'argent reçu</a>` : '✅ Terminé'}
+            </td>
+        </tr>
+    `).join('');
+
+    res.send(`
+    <!DOCTYPE html>
+    <html lang="fr">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Panneau Gérant - KNACOM</title>
+        <style>
+            body { font-family: Arial, sans-serif; padding: 20px; background: #f4f6f9; }
+            .container { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); max-width: 600px; margin: 0 auto; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h2>⚙️ Panneau de contrôle du Gérant</h2>
+            <p>Dès que vous recevez la notification de dépôt sur votre application Wave, cliquez sur "Valider" ci-dessous :</p>
+            
+            <table style="width:100%; border-collapse:collapse; margin-top:20px;">
+                <thead>
+                    <tr style="background:#f8f9fa; text-align:left;">
+                        <th style="padding:10px;">ID Ref</th>
+                        <th style="padding:10px;">Montant</th>
+                        <th style="padding:10px;">Statut</th>
+                        <th style="padding:10px;">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${lignesTableau.length > 0 ? lignesTableau : '<tr><td colspan="4" style="padding:20px; text-align:center; color:#7f8c8d;">Aucun paiement en attente.</td></tr>'}
+                </tbody>
+            </table>
+            <br>
+            <a href="/" style="color:#1ac6ff; text-decoration:none;">⬅️ Retour à l'accueil</a>
+        </div>
+    </body>
+    </html>
+    `);
+});
+
+// Route pour que le gérant valide le paiement
+app.get('/valider-txn', (req, res) => {
+    const txnId = req.query.id;
+    const txn = transactionsEnAttente.find(t => t.id === txnId);
+    if (txn) {
+        txn.statut = "Validé";
+    }
+    res.redirect('/gerant-dashboard');
+});
+
 app.listen(PORT, () => {
-    console.log(`Le serveur KNACOM Wave Pro tourne sur le port ${PORT}`);
+    console.log(`Serveur de tontine sécurisé actif sur le port ${PORT}`);
 });
