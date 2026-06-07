@@ -77,7 +77,6 @@ app.post('/creer-cercle', async (req, res) => {
     } catch (err) { res.status(500).json({ error: "Erreur" }); }
 });
 
-// Page d'inscription avec étape de paiement
 app.get('/rejoindre/:code', async (req, res) => {
     const code = req.params.code;
     try {
@@ -98,7 +97,7 @@ app.get('/rejoindre/:code', async (req, res) => {
             <html lang="fr">
             <head>
                 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>Rejoindre la tontine</title>
+                <title>Rejoindre et Payer</title>
                 <style>
                     body { font-family: Arial, sans-serif; text-align: center; background-color: #f4f4f9; padding: 20px; }
                     .card { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); display: inline-block; max-width: 400px; width: 100%; text-align: left; box-sizing: border-box; }
@@ -113,37 +112,28 @@ app.get('/rejoindre/:code', async (req, res) => {
                     <div id="form-container">
                         <h1 style="text-align:center; color:#2980b9; margin-top:0;">👋 Inscription</h1>
                         <p>Cercle : <strong>${cercle.nom_cercle}</strong></p>
-                        
                         <div class="price-box">
                             💰 Cotisation : <strong>${cercle.montant_cotisation} FCFA</strong><br>
                             ⚡ Frais (1%) : <strong>${Math.round(cercle.montant_cotisation * 0.01)} FCFA</strong><br>
                             🛒 Total : <strong style="color:#e67e22;">${Math.round(cercle.montant_cotisation * 1.01)} FCFA</strong>
                         </div>
-                        
                         <label for="prenom" style="font-weight:bold;">Ton prénom :</label>
                         <input type="text" id="prenom" placeholder="Entre ton prénom ici...">
-                        <button onclick="genererRecu()">Generer ma demande de paiement</button>
+                        <button onclick="genererRecu()">Générer ma demande de paiement</button>
                     </div>
-
                     <div id="payment-container" class="step-2">
-                        <h3 style="color:#27ae60; margin-top:0;">📋 Étape Finale : Paiement</h3>
-                        <p>1️⃣ Clique sur le bouton bleu ci-dessous pour ouvrir Wave.<br>
-                        2️⃣ **IMPORTANT** : Ajoute ce code exact dans les notes Wave de ton transfert : <br>
+                        <h3>📋 Étape Finale : Paiement</h3>
+                        <p>Ajoute ce code exact dans les notes Wave : <br>
                         <span style="font-size:20px; font-weight:bold; color:#e74c3c; display:block; text-align:center; margin:10px 0;" id="display-cle"></span></p>
-                        
-                        <button style="background:#25D366; margin-bottom:10px;" onclick="ouvrirWave()">📱 Ouvrir l'application Wave</button>
-                        <button style="background:#34495e;" onclick="verifierStatut()">🔄 J'ai payé, vérifier mon reçu</button>
+                        <button style="background:#25D366; color:white; border:none; padding:12px; width:100%; border-radius:5px; font-weight:bold; margin-bottom:10px;" onclick="ouvrirWave()">📱 Ouvrir Wave</button>
+                        <button style="background:#34495e; color:white; border:none; padding:12px; width:100%; border-radius:5px; font-weight:bold;" onclick="verifierStatut()">🔄 Vérifier mon reçu</button>
                     </div>
                 </div>
-
                 <script>
                     let codeRecuGlobal = '';
-                    let prenomGlobal = '';
-
                     async function genererRecu() {
                         const prenom = document.getElementById('prenom').value.trim();
                         if(!prenom) return alert("Mets ton prénom !");
-                        
                         const res = await fetch('/generer-recu', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
@@ -152,29 +142,22 @@ app.get('/rejoindre/:code', async (req, res) => {
                         const data = await res.json();
                         if(data.success) {
                             codeRecuGlobal = data.cleRecu;
-                            prenomGlobal = prenom;
                             document.getElementById('display-cle').innerText = data.cleRecu;
                             document.getElementById('form-container').style.display = 'none';
                             document.getElementById('payment-container').style.display = 'block';
-                        } else {
-                            alert(data.error);
-                        }
+                        } else { alert(data.error); }
                     }
-
                     function ouvrirWave() {
                         const total = ${Math.round(cercle.montant_cotisation * 1.01)};
                         window.location.href = "https://pay.wave.com/m/M_keWb8PBIy-lU/c/ci/?amount=" + total;
                     }
-
                     async function verifierStatut() {
                         const res = await fetch('/verifier-recu?cle=' + codeRecuGlobal);
                         const data = await res.json();
                         if(data.statut === 'Valide') {
-                            alert("🎉 Paiement confirmé ! Bienvenue dans la tontine.");
+                            alert("🎉 Inscription validée !");
                             window.location.href = '/cercle/${code}';
-                        } else {
-                            alert("⏳ Reçu toujours en attente de validation par l'administrateur. Réessaie dans un instant.");
-                        }
+                        } else { alert("⏳ Reçu en cours d'analyse admin."); }
                     }
                 </script>
             </body>
@@ -183,20 +166,17 @@ app.get('/rejoindre/:code', async (req, res) => {
     } catch (err) { res.status(500).send("Erreur"); }
 });
 
-// API : Générer un reçu temporaire
 app.post('/generer-recu', async (req, res) => {
     const { nom, code } = req.body;
     const cleRecu = 'REC-' + Math.floor(1000 + Math.random() * 9000);
     try {
         const check = await pool.query('SELECT * FROM participants WHERE UPPER(nom_participant) = UPPER($1) AND code_invitation = $2', [nom, code]);
         if (check.rows.length > 0) return res.status(400).json({ error: "Prénom déjà inscrit !" });
-
         await pool.query('INSERT INTO recus_paiement (nom_participant, code_invitation, cle_recu) VALUES ($1, $2, $3)', [nom, code, cleRecu]);
         res.json({ success: true, cleRecu });
     } catch (err) { res.status(500).json({ error: "Erreur" }); }
 });
 
-// API : Vérifier l'état du reçu
 app.get('/verifier-recu', async (req, res) => {
     const { cle } = req.query;
     try {
@@ -206,80 +186,58 @@ app.get('/verifier-recu', async (req, res) => {
     } catch (err) { res.status(500).json({ error: "Erreur" }); }
 });
 
-// 🌟 INTERFACE SECRÈTE ADMIN : Pour valider les paiements reçus sur ton compte Wave
 app.get('/admin-validation', async (req, res) => {
     try {
         const result = await pool.query("SELECT * FROM recus_paiement WHERE statut = 'En attente' ORDER BY id DESC");
         let lignes = '';
         result.rows.forEach(r => {
-            lignes += `
-                <tr>
-                    <td>${r.nom_participant}</td>
-                    <td><strong style="color:#e74c3c;">${r.cle_recu}</strong></td>
-                    <td><button onclick="validerPaiement('${r.cle_recu}', '${r.nom_participant}', '${r.code_invitation}')" style="background:#2ecc71; color:white; border:none; padding:8px; border-radius:4px; cursor:pointer;">✅ Confirmer la réception Wave</button></td>
-                </tr>
-            `;
+            lignes += `<tr><td>${r.nom_participant}</td><td><strong style="color:#e74c3c;">${r.cle_recu}</strong></td><td><button onclick="validerPaiement('${r.cle_recu}', '${r.nom_participant}', '${r.code_invitation}')" style="background:#2ecc71; color:white; border:none; padding:8px; border-radius:4px; cursor:pointer;">✅ Valider</button></td></tr>`;
         });
-
         res.send(`
-            <!DOCTYPE html>
-            <html lang="fr">
-            <head>
-                <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>Espace Validation Admin</title>
-                <style>
-                    body { font-family: Arial; background:#f4f4f9; padding:20px; text-align:center; }
-                    .card { background:white; padding:20px; border-radius:8px; box-shadow:0 2px 10px rgba(0,0,0,0.1); inline-block; width:100%; max-width:600px; display:inline-block; text-align:left; }
-                    table { width:100%; border-collapse:collapse; margin-top:15px; }
-                    th, td { padding:12px; border-bottom:1px solid #ddd; text-align:left; }
-                    th { background:#f7fafc; }
-                </style>
-            </head>
-            <body>
-                <div class="card">
-                    <h2>🔑 Validation des Dépôts Tontine</h2>
-                    <p>Vérifie ton application Wave. Dès que tu vois un transfert avec une note correspondante, clique sur le bouton vert pour valider l'accès du membre.</p>
-                    <table>
-                        <thead><tr><th>Candidat</th><th>Code Attendu</th><th>Action</th></tr></thead>
-                        <tbody>${lignes || '<tr><td colspan="3" style="text-align:center; color:grey;">Aucun dépôt en attente.</td></tr>'}</tbody>
+            <html lang="fr"><body style="font-family:Arial; padding:20px; text-align:center; background:#f4f4f9;">
+                <div style="background:white; padding:20px; border-radius:8px; box-shadow:0 2px 10px rgba(0,0,0,0.1); display:inline-block; text-align:left; width:100%; max-width:500px;">
+                    <h2>🔑 Validation Reçus Wave</h2>
+                    <table style="width:100%; border-collapse:collapse;">
+                        <thead><tr style="background:#eee;"><th>Nom</th><th>Code</th><th>Action</th></tr></thead>
+                        <tbody>${lignes || '<tr><td colspan="3" style="text-align:center;">Aucun dépôt.</td></tr>'}</tbody>
                     </table>
                 </div>
                 <script>
                     async function validerPaiement(cle, nom, code) {
-                        const res = await fetch('/admin-confirmer', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ cle, nom, code })
-                        });
-                        const data = await res.json();
-                        if(data.success) { alert("Membre validé !"); window.location.reload(); }
+                        await fetch('/admin-confirmer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cle, nom, code }) });
+                        window.location.reload();
                     }
                 </script>
-            </body>
-            </html>
+            </body></html>
         `);
     } catch (err) { res.status(500).send("Erreur"); }
 });
 
-// API : Traitement de la validation Admin
 app.post('/admin-confirmer', async (req, res) => {
     const { cle, nom, code } = req.body;
     try {
-        // 1. Passer le reçu à Valide
         await pool.query("UPDATE recus_paiement SET statut = 'Valide' WHERE cle_recu = $1", [cle]);
-        // 2. Inscrire officiellement le membre dans la tontine
         await pool.query('INSERT INTO participants (nom_participant, code_invitation) VALUES ($1, $2)', [nom, code]);
         res.json({ success: true });
     } catch (err) { res.status(500).json({ error: "Erreur" }); }
 });
 
-// Tirage au sort
+app.post('/toggle-paiement', async (req, res) => {
+    const { nom, code } = req.body;
+    try {
+        await pool.query(
+            'UPDATE participants SET a_paye_periode = NOT a_paye_periode WHERE nom_participant = $1 AND code_invitation = $2',
+            [nom, code]
+        );
+        res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: "Erreur" }); }
+});
+
 app.post('/lancer-tirage/:code', async (req, res) => {
     const code = req.params.code;
     try {
         const participantsRes = await pool.query('SELECT id FROM participants WHERE code_invitation = $1 AND ordre_passage IS NULL', [code]);
-        if(participantsRes.rows.length === 0) return res.status(400).json({ error: "Le tirage a déjà été fait." });
-
+        if(participantsRes.rows.length === 0) return res.status(400).json({ error: "Déjà fait." });
         let ids = participantsRes.rows.map(r => r.id);
         for (let i = ids.length - 1; i > 0; i--) {
             const j = Math.floor(Math.random() * (i + 1));
@@ -292,7 +250,7 @@ app.post('/lancer-tirage/:code', async (req, res) => {
     } catch (err) { res.status(500).json({ error: "Erreur" }); }
 });
 
-// Tableau de bord
+// Tableau de bord corrigé avec liaisons strictes des variables
 app.get('/cercle/:code', async (req, res) => {
     const code = req.params.code;
     try {
@@ -300,15 +258,28 @@ app.get('/cercle/:code', async (req, res) => {
         if (cercleRes.rows.length === 0) return res.send("<h1>❌ Tontine introuvable</h1>");
         const cercle = cercleRes.rows[0];
 
-        const participantsRes = await pool.query('SELECT nom_participant FROM participants WHERE code_invitation = $1 ORDER BY id ASC', [code]);
-        const pNoms = participantsRes.rows.map(r => r.nom_participant);
+        const participantsRes = await pool.query('SELECT nom_participant, a_paye_periode FROM participants WHERE code_invitation = $1 ORDER BY id ASC', [code]);
+        const participants = participantsRes.rows;
 
         const calendrierRes = await pool.query('SELECT nom_participant FROM participants WHERE code_invitation = $1 AND ordre_passage IS NOT NULL ORDER BY ordre_passage ASC', [code]);
         const ordreTirage = calendrierRes.rows.map(r => r.nom_participant);
 
         let lignesTableau = '';
-        pNoms.forEach((nom, index) => {
-            lignesTableau += `<tr><td style="font-weight:bold; color:#7f8c8d; width:40px;">${index + 1}</td><td>👤 ${nom}</td></tr>`;
+        participants.forEach((p, index) => {
+            const badgeColor = p.a_paye_periode ? '#2ecc71' : '#e74c3c';
+            const badgeText = p.a_paye_periode ? '🟢 Payé' : '🔴 En retard';
+            
+            lignesTableau += `
+                <tr>
+                    <td style="font-weight:bold; color:#7f8c8d; width:40px;">${index + 1}</td>
+                    <td>👤 ${p.nom_participant}</td>
+                    <td>
+                        <span class="badge-paiement" onclick="switchPaiement('${p.nom_participant}')" style="background:${badgeColor}; color:white; padding:5px 10px; border-radius:20px; font-size:12px; font-weight:bold; cursor:pointer; display:inline-block;">
+                            ${badgeText}
+                        </span>
+                    </td>
+                </tr>
+            `;
         });
 
         let sectionTirage = '';
@@ -318,17 +289,17 @@ app.get('/cercle/:code', async (req, res) => {
             boutonTirageHtml = `<div style="text-align:center; color:#27ae60; font-weight:bold; margin-top:15px; font-size:15px;">🔒 Ordre de tirage verrouillé en Base de données Cloud</div>`;
             sectionTirage = `<h3>📅 Calendrier des Bénéficiaires :</h3><div style="background:#fef9e7; padding:15px; border-radius:8px; border-left:5px solid #f39c12; margin-bottom:20px;">`;
             ordreTirage.forEach((nom, index) => {
-                sectionTirage += `🔹 <strong>${cercle.periode} ${index + 1}</strong> : ${nom} (Gagne ${pNoms.length * cercle.montant_cotisation} FCFA) <br>`;
+                sectionTirage += `🔹 <strong>${cercle.periode} ${index + 1}</strong> : ${nom} (Gagne ${participants.length * cercle.montant_cotisation} FCFA) <br>`;
             });
             sectionTirage += `</div>`;
         }
 
         let boutonWhatsAppHtml = '';
-        if (pNoms.length < cercle.limite_participants) {
-            const messageWhatsApp = encodeURIComponent(`Rejoins ma tontine "${cercle.nom_cercle}" (${cercle.montant_cotisation} FCFA / ${cercle.periode.toLowerCase()}) : https://tontine-mvp.onrender.com/rejoindre/${code}`);
+        if (participants.length < cercle.limite_participants) {
+            const messageWhatsApp = encodeURIComponent(`Rejoins ma tontine "${cercle.nom_cercle}" : https://tontine-mvp.onrender.com/rejoindre/${code}`);
             boutonWhatsAppHtml = `<a class="btn-action" style="background:#25D366;" href="https://wa.me/?text=${messageWhatsApp}" target="_blank">🟢 Inviter via WhatsApp</a>`;
         } else {
-            boutonWhatsAppHtml = `<div style="text-align:center; background:#e2e8f0; color:#4a5568; padding:12px; border-radius:6px; font-weight:bold; margin-top:10px;">👥 Tontine complète (${pNoms.length}/${cercle.limite_participants}) - Invitations fermées</div>`;
+            boutonWhatsAppHtml = `<div style="text-align:center; background:#e2e8f0; color:#4a5568; padding:12px; border-radius:6px; font-weight:bold; margin-top:10px;">👥 Tontine complète (${participants.length}/${cercle.limite_participants}) - Invitations fermées</div>`;
         }
 
         res.send(`
@@ -354,13 +325,21 @@ app.get('/cercle/:code', async (req, res) => {
                     <div class="info-box">
                         🎯 Tontine : <strong>${cercle.nom_cercle}</strong><br>
                         💰 Cotisation : <strong>${cercle.montant_cotisation} FCFA / ${cercle.periode.toLowerCase()}</strong><br>
-                        👥 Membres : <strong>${pNoms.length} / ${cercle.limite_participants}</strong>
+                        👥 Membres : <strong>${participants.length} / ${cercle.limite_participants}</strong>
                     </div>
                     ${sectionTirage}
-                    <h3>👥 Membres inscrits :</h3>
+                    <h3>👥 Membres et Cotisations :</h3>
                     <table>
-                        <thead><tr><th>N°</th><th>Prénom / Nom</th></tr></thead>
-                        <tbody>${lignesTableau}</tbody>
+                        <thead>
+                            <tr>
+                                <th>N°</th>
+                                <th>Nom</th>
+                                <th>Statut Période</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${lignesTableau}
+                        </tbody>
                     </table>
                     ${boutonTirageHtml}
                     ${boutonWhatsAppHtml}
@@ -368,10 +347,19 @@ app.get('/cercle/:code', async (req, res) => {
                 </div>
                 <script>
                     async function lancerLeTirage() {
-                        if(${pNoms.length} < 2) return alert("Il faut au moins 2 membres !");
+                        if(${participants.length} < 2) return alert("Il faut au moins 2 membres !");
                         const res = await fetch('/lancer-tirage/${code}', { method: 'POST' });
                         const data = await res.json();
-                        if(data.success) { alert("🎲 Tirage effectué !"); window.location.reload(); }
+                        if(data.success) window.location.reload();
+                    }
+                    async function switchPaiement(nom) {
+                        const res = await fetch('/toggle-paiement', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ nom, code: '${code}' })
+                        });
+                        const data = await res.json();
+                        if(data.success) window.location.reload();
                     }
                 </script>
             </body>
