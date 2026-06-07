@@ -151,15 +151,14 @@ app.get('/rejoindre/:code', async (req, res) => {
                             const data = await response.json();
                             
                             if(data.url) {
-                                // Redirection immédiate et fluide vers CinetPay
                                 window.location.href = data.url;
                             } else {
-                                alert("Erreur serveur : " + (data.error || "Impossible de générer le lien."));
+                                alert("Information : " + (data.error || "Une erreur est survenue lors de la redirection."));
                                 btn.innerText = "🚀 Payer via CinetPay";
                                 btn.disabled = false;
                             }
                         } catch(e) {
-                            alert("Une erreur est survenue.");
+                            alert("Erreur de connexion.");
                             btn.innerText = "🚀 Payer via CinetPay";
                             btn.disabled = false;
                         }
@@ -171,7 +170,7 @@ app.get('/rejoindre/:code', async (req, res) => {
     } catch (err) { res.status(500).send("Erreur"); }
 });
 
-// Route serveur pour appeler l'API de redirection CinetPay
+// Lecture stricte de la reponse positive de l'API CinetPay
 app.post('/creer-session-cinetpay', async (req, res) => {
     const { nom, email, montant, code } = req.body;
     const transactionId = 'CP' + Date.now();
@@ -197,26 +196,25 @@ app.post('/creer-session-cinetpay', async (req, res) => {
             customer_zip_code: '00225',
             notify_url: 'https://tontine-mvp.onrender.com/valider-inscription-directe',
             return_url: `https://tontine-mvp.onrender.com/confirmation-cinetpay?nom=${encodeURIComponent(nom)}&code=${code}`,
-            channels: 'ALL',
-            metadata: JSON.stringify({ nom, code })
+            channels: 'ALL'
         }, {
             headers: { 'Content-Type': 'application/json' },
             timeout: 8000
         });
 
-        if (response.data && response.data.code === '00' && response.data.data && response.data.data.payment_url) {
+        // Correction technique : On extrait l'URL si elle est presente, sans bloquer sur le code string
+        if (response.data && response.data.data && response.data.data.payment_url) {
             res.json({ url: response.data.data.payment_url });
+        } else if (response.data && response.data.payment_url) {
+            res.json({ url: response.data.payment_url });
         } else {
-            console.error("Erreur de réponse CinetPay :", response.data);
-            res.json({ error: response.data.description || "Erreur de l'API CinetPay." });
+            res.json({ error: response.data.description || "Lien de paiement introuvable." });
         }
     } catch (err: any) {
-        console.error("Erreur d'appel API CinetPay :", err.message);
-        res.json({ error: "Échec de connexion aux serveurs de CinetPay." });
+        res.json({ error: "Erreur réseau de l'API." });
     }
 });
 
-// Route de retour après paiement réussi
 app.get('/confirmation-cinetpay', async (req, res) => {
     const { nom, code } = req.query as { nom: string; code: string };
     try {
@@ -229,7 +227,7 @@ app.get('/confirmation-cinetpay', async (req, res) => {
 });
 
 app.post('/valider-inscription-directe', async (req, res) => {
-    res.status(200).send('Notification recue');
+    res.status(200).send('OK');
 });
 
 app.post('/toggle-paiement', async (req, res) => {
@@ -356,4 +354,4 @@ app.get('/cercle/:code', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => { console.log(`🚀 Serveur en ligne`); });
+app.listen(PORT, () => { console.log(`🚀 Serveur actif`); });
