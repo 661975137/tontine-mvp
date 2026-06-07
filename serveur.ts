@@ -12,7 +12,6 @@ const pool = new Pool({
 });
 
 const FEDAPAY_SECRET_KEY = process.env.FEDAPAY_SECRET_KEY || '';
-// Utilisation de l'endpoint standard avec gestion rigoureuse des en-têtes marchands
 const FEDAPAY_API_URL = 'https://api.fedapay.com/v1';
 
 // Accueil
@@ -106,7 +105,7 @@ app.get('/rejoindre/:code', async (req, res) => {
                 <style>
                     body { font-family: Arial, sans-serif; text-align: center; background-color: #f4f4f9; padding: 20px; }
                     .card { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); display: inline-block; max-width: 400px; width: 100%; text-align: left; box-sizing: border-box; }
-                    input { width: 100%; padding: 12px; margin: 15px 0; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; font-size: 16px; }
+                    input { width: 100%; padding: 12px; margin: 10px 0 15px 0; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; font-size: 16px; }
                     button { background-color: #e74c3c; color: white; border: none; padding: 14px; border-radius: 6px; font-weight: bold; width: 100%; font-size: 16px; cursor: pointer; }
                     .price-box { background: #fef9e7; border-left: 5px solid #f1c40f; padding: 12px; margin-bottom: 20px; border-radius: 6px; }
                     .fallback-box { display:none; background:#edf2f7; padding:15px; border-radius:6px; margin-top:15px; border-left:5px solid #4a5568; }
@@ -126,8 +125,11 @@ app.get('/rejoindre/:code', async (req, res) => {
 
                         <p>👥 Places disponibles : <strong>${placesDisponibles} / ${cercle.limite_participants}</strong></p>
                         
-                        <label for="prenom" style="font-weight:bold;">Ton prénom :</label>
+                        <label for="prenom" style="font-weight:bold;">👤 Ton prénom :</label>
                         <input type="text" id="prenom" placeholder="Entre ton prénom ici..." required>
+
+                        <label for="email" style="font-weight:bold;">📧 Ton Email :</label>
+                        <input type="email" id="email" placeholder="Ex: exemple@gmail.com" required>
                         
                         <button id="btn-pay" onclick="lancerPaiement()">🚀 Payer via FedaPay</button>
                     </div>
@@ -144,7 +146,8 @@ app.get('/rejoindre/:code', async (req, res) => {
                     let currentRecCode = '';
                     async function lancerPaiement() {
                         const prenom = document.getElementById('prenom').value.trim();
-                        if(!prenom) return alert("Mets ton prénom !");
+                        const email = document.getElementById('email').value.trim();
+                        if(!prenom || !email) return alert("S'il te plaît, remplis ton prénom et ton adresse email !");
                         
                         const btn = document.getElementById('btn-pay');
                         btn.innerText = "⏳ Génération du guichet sécurisé...";
@@ -153,7 +156,7 @@ app.get('/rejoindre/:code', async (req, res) => {
                         const response = await fetch('/creer-session-fedapay', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ nom: prenom, code: '${code}' })
+                            body: JSON.stringify({ nom: prenom, email: email, code: '${code}' })
                         });
                         const data = await response.json();
                         
@@ -187,7 +190,7 @@ app.get('/rejoindre/:code', async (req, res) => {
 });
 
 app.post('/creer-session-fedapay', async (req, res) => {
-    const { nom, code } = req.body;
+    const { nom, email, code } = req.body;
     const cleRecu = 'REC-' + Math.floor(1000 + Math.random() * 9000);
     try {
         const check = await pool.query('SELECT * FROM participants WHERE UPPER(nom_participant) = UPPER($1) AND code_invitation = $2', [nom, code]);
@@ -195,15 +198,14 @@ app.post('/creer-session-fedapay', async (req, res) => {
 
         const cercleRes = await pool.query('SELECT montant_cotisation FROM cercles WHERE code_invitation = $1', [code]);
         const total = Math.round(cercleRes.rows[0].montant_cotisation * 1.01);
-        const emailFictif = `${nom.toLowerCase().replace(/[^a-z0-9]/g, '')}-${code}@tontine.local`;
 
-        // Étape 1 : Créer la transaction sur l'API de FedaPay
+        // Appel à l'API FedaPay avec les informations utilisateur validées
         const response = await axios.post(`${FEDAPAY_API_URL}/transactions`, {
             amount: total,
             currency: { iso: 'XOF' },
             description: `Tontine - ${nom}`,
             callback_url: `https://tontine-mvp.onrender.com/validation-automatique?nom=${encodeURIComponent(nom)}&code=${code}`,
-            customer: { firstname: nom, email: emailFictif }
+            customer: { firstname: nom, email: email }
         }, {
             headers: { 
                 'Authorization': `Bearer ${FEDAPAY_SECRET_KEY}`,
@@ -212,7 +214,6 @@ app.post('/creer-session-fedapay', async (req, res) => {
             timeout: 6000
         });
 
-        // Étape 2 : Demander le jeton d'accès sécurisé pour l'iframe ou la redirection
         const transactionId = response.data.v1.transaction.id;
         const tokenResponse = await axios.post(`${FEDAPAY_API_URL}/transactions/${transactionId}/token`, {}, {
             headers: { 
@@ -224,7 +225,7 @@ app.post('/creer-session-fedapay', async (req, res) => {
         if (tokenResponse.data && tokenResponse.data.v1 && tokenResponse.data.v1.token) {
             res.json({ url: tokenResponse.data.v1.token.url });
         } else {
-            throw new Error("Token introuvable");
+            throw new Error("Token vide");
         }
     } catch (err) {
         console.error("Bascule automatique en mode secours.");
@@ -280,7 +281,7 @@ app.get('/admin-validation', async (req, res) => {
 });
 
 app.post('/admin-confirmer', async (req, res) => {
-    const { cle, nom, code } = req.body;
+    const { append, cle, nom, code } = req.body;
     try {
         await pool.query("UPDATE recus_paiement SET statut = 'Valide' WHERE cle_recu = $1", [cle]);
         await pool.query('INSERT INTO participants (nom_participant, code_invitation, a_paye_periode) VALUES ($1, $2, TRUE)', [nom, code]);
@@ -386,7 +387,7 @@ app.get('/cercle/:code', async (req, res) => {
                     </table>
                     ${boutonTirageHtml}
                     ${boutonWhatsAppHtml}
-                    <a href="/" style="display:block; text-align:center; color:#718096; margin-top:15px; text-decoration:none; font-size:14px;">➕ Créer une another tontine</a>
+                    <a href="/" style="display:block; text-align:center; color:#718096; margin-top:15px; text-decoration:none; font-size:14px;">➕ Créer une autre tontine</a>
                 </div>
                 <script>
                     async function lancerLeTirage() {
