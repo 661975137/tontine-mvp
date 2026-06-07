@@ -11,7 +11,18 @@ const pool = new Pool({
     ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
 });
 
-// Accueil
+// ROUTE DE MIGRATION AUTOMATIQUE AU DÉMARRAGE
+async function executerMigration() {
+    try {
+        await pool.query('ALTER TABLE cercles ADD COLUMN IF NOT EXISTS frais_adhesion INT DEFAULT 0;');
+        console.log("✅ Colonne frais_adhesion verifiee ou creee en base Cloud avec succes.");
+    } catch (err: any) {
+        console.error("Erreur lors de la migration automatique :", err.message);
+    }
+}
+executerMigration();
+
+// Accueil avec champ Frais d'Adhésion
 app.get('/', (req, res) => {
     res.send(`
         <!DOCTYPE html>
@@ -33,8 +44,13 @@ app.get('/', (req, res) => {
                 <h1>🚀 Nouvelle Tontine</h1>
                 <label for="nom">🎯 Nom du cercle</label>
                 <input type="text" id="nom" placeholder="Ex: Tontine Côte d'Ivoire..." required>
+                
                 <label for="montant">💰 Montant de la cotisation (FCFA)</label>
                 <input type="number" id="montant" placeholder="Ex: 10000" required>
+
+                <label for="adhesion" style="color:#e67e22;">🎟️ Droit d'adhésion unique (FCFA)</label>
+                <input type="number" id="adhesion" placeholder="Ex: 1000" value="1000" required>
+                
                 <label for="periode">📅 Période des rotations</label>
                 <select id="periode">
                     <option value="Semaine">Par Semaine</option>
@@ -49,13 +65,20 @@ app.get('/', (req, res) => {
                 async function creerTontine() {
                     const nom = document.getElementById('nom').value.trim();
                     const montant = document.getElementById('montant').value;
+                    const adhesion = document.getElementById('adhesion').value;
                     const periode = document.getElementById('periode').value;
                     const limite = document.getElementById('limite').value;
-                    if(!nom || !montant || !limite) return alert("Remplis tout !");
+                    if(!nom || !montant || !adhesion || !limite) return alert("Remplis tout !");
                     const response = await fetch('/creer-cercle', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ nom, montant: parseInt(montant), periode, limite: parseInt(limite) })
+                        body: JSON.stringify({ 
+                            nom, 
+                            montant: parseInt(montant), 
+                            adhesion: parseInt(adhesion), 
+                            periode, 
+                            limite: parseInt(limite) 
+                        })
                     });
                     const data = await response.json();
                     if(data.codeUnique) window.location.href = '/cercle/' + data.codeUnique;
@@ -67,12 +90,12 @@ app.get('/', (req, res) => {
 });
 
 app.post('/creer-cercle', async (req, res) => {
-    const { nom, montant, periode, limite } = req.body;
+    const { nom, montant, adhesion, periode, limite } = req.body;
     const codeUnique = 'tnt-' + Math.floor(1000 + Math.random() * 9000);
     try {
         await pool.query(
-            'INSERT INTO cercles (nom_cercle, montant_cotisation, code_invitation, periode, limite_participants) VALUES ($1, $2, $3, $4, $5)',
-            [nom, montant, codeUnique, periode || 'Mois', limite || 10]
+            'INSERT INTO cercles (nom_cercle, montant_cotisation, frais_adhesion, code_invitation, periode, limite_participants) VALUES ($1, $2, $3, $4, $5, $6)',
+            [nom, montant, adhesion || 0, codeUnique, periode || 'Mois', limite || 10]
         );
         res.json({ codeUnique });
     } catch (err) { res.status(500).json({ error: "Erreur BDD" }); }
@@ -93,8 +116,10 @@ app.get('/rejoindre/:code', async (req, res) => {
             return res.send(`<div style="font-family:Arial; text-align:center; padding:50px;"><h1>🛑 Tontine complète !</h1><br><a href="/cercle/${code}">📊 Voir le tableau de bord</a></div>`);
         }
 
-        const totalReglement = Math.round(cercle.montant_cotisation * 1.01);
-        const transactionId = 'CP' + Date.now();
+        const montantCotisation = cercle.montant_cotisation;
+        const droitAdhesion = cercle.frais_adhesion || 0;
+        const fraisTechniques = Math.round((montantCotisation + droitAdhesion) * 0.01);
+        const totalReglement = montantCotisation + droitAdhesion + fraisTechniques;
 
         res.send(`
             <!DOCTYPE html>
@@ -107,7 +132,7 @@ app.get('/rejoindre/:code', async (req, res) => {
                     .card { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); display: inline-block; max-width: 400px; width: 100%; text-align: left; box-sizing: border-box; }
                     input { width: 100%; padding: 12px; margin: 10px 0 15px 0; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; font-size: 16px; }
                     #pay-button { background-color: #3498db; color: white; border: none; padding: 14px; border-radius: 6px; font-weight: bold; width: 100%; font-size: 16px; cursor: pointer; width: 100%; }
-                    .price-box { background: #fef9e7; border-left: 5px solid #f1c40f; padding: 12px; margin-bottom: 20px; border-radius: 6px; }
+                    .price-box { background: #fef9e7; border-left: 5px solid #f1c40f; padding: 12px; margin-bottom: 20px; border-radius: 6px; font-size: 15px; }
                 </style>
             </head>
             <body>
@@ -116,9 +141,10 @@ app.get('/rejoindre/:code', async (req, res) => {
                     <p>Cercle : <strong>${cercle.nom_cercle}</strong></p>
                     
                     <div class="price-box">
-                        💰 Cotisation : <strong>${cercle.montant_cotisation} FCFA</strong><br>
-                        ⚡ Frais (1%) : <strong>${Math.round(cercle.montant_cotisation * 0.01)} FCFA</strong><br>
-                        🛒 Total à régler : <strong style="color:#e67e22;">${totalReglement} FCFA</strong>
+                        💰 Cotisation Période : <strong>${montantCotisation} FCFA</strong><br>
+                        🎟️ Droit d'adhésion unique : <strong>${droitAdhesion} FCFA</strong><br>
+                        ⚡ Frais réseau (1%) : <strong>${fraisTechniques} FCFA</strong><br><br>
+                        🛒 Total à régler : <strong style="color:#e67e22; font-size:18px;">${totalReglement} FCFA</strong>
                     </div>
 
                     <p>👥 Places disponibles : <strong>${placesDisponibles} / ${cercle.limite_participants}</strong></p>
@@ -182,7 +208,7 @@ app.post('/creer-session-cinetpay', async (req, res) => {
             amount: montant,
             currency: 'XOF',
             alternative_currency: '',
-            description: 'Cotisation Tontine - ' + nom,
+            description: 'Adhésion + Cotisation Tontine - ' + nom,
             customer_id: 'ID' + Math.floor(Math.random() * 10000),
             customer_name: nom,
             customer_surname: nom,
@@ -220,7 +246,7 @@ app.get('/confirmation-cinetpay', async (req, res) => {
         if (check.rows.length === 0) {
             await pool.query('INSERT INTO participants (nom_participant, code_invitation, a_paye_periode) VALUES ($1, $2, TRUE)', [nom, code]);
         }
-        res.send(`<div style="font-family:Arial; text-align:center; padding:50px;"><h1 style="color:#2ecc71;">🎉 Paiement Accepté avec succès !</h1><br><a href="/cercle/${code}">📊 Accéder au Tableau de bord</a></div>`);
+        res.send(`<div style="font-family:Arial; text-align:center; padding:50px;"><h1 style="color:#2ecc71;">🎉 Paiement et adhésion validés !</h1><br><a href="/cercle/${code}">📊 Accéder au Tableau de bord</a></div>`);
     } catch (err) { res.status(500).send("Erreur"); }
 });
 
@@ -253,7 +279,6 @@ app.post('/lancer-tirage/:code', async (req, res) => {
     } catch (err) { res.status(500).json({ error: "Erreur" }); }
 });
 
-// Tableau de bord AMÉLIORÉ
 app.get('/cercle/:code', async (req, res) => {
     const code = req.params.code;
     try {
@@ -274,13 +299,12 @@ app.get('/cercle/:code', async (req, res) => {
             lignesTableau += `<tr><td>${index + 1}</td><td>👤 ${p.nom_participant}</td><td><span onclick="switchPaiement('${p.nom_participant}')" style="background:${badgeColor}; color:white; padding:5px 10px; border-radius:20px; font-size:12px; font-weight:bold; cursor:pointer; display:inline-block;">${badgeText}</span></td></tr>`;
         });
 
-        // 1. Amélioration Visuelle : Détermination et affichage du bénéficiaire en cours
         let encadreBeneficiaire = '';
         let sectionTirage = '';
         let boutonTirageHtml = `<button class="btn-action" style="background:#f39c12;" onclick="lancerLeTirage()">🎲 Lancer le tirage au sort</button>`;
 
         if (ordreTirage.length > 0) {
-            const beneficiaireActuel = ordreTirage[0]; // Pour le MVP, on affiche le premier de la liste
+            const beneficiaireActuel = ordreTirage[0];
             const montantTotalCagnotte = participants.length * cercle.montant_cotisation;
 
             encadreBeneficiaire = `
@@ -290,7 +314,7 @@ app.get('/cercle/:code', async (req, res) => {
                 </div>
             `;
 
-            boutonTirageHtml = `<div style="text-align:center; color:#27ae60; font-weight:bold; margin-top:15px; font-size:15px;">🔒 Ordre de tirage verrouillé en Base Cloud</div>`;
+            boutonTirageHtml = `<div style="text-align:center; color:#27ae60; font-weight:bold; margin-top:15px; font-size:15px;">🔒 Ordre de tirage verrouillé</div>`;
             sectionTirage = `<h3>📅 Calendrier complet des rotations :</h3><div style="background:#fef9e7; padding:15px; border-radius:8px; border-left:5px solid #f39c12; margin-bottom:20px;">`;
             ordreTirage.forEach((nom, index) => {
                 sectionTirage += `🔹 <strong>${cercle.periode} ${index + 1}</strong> : ${nom} <br>`;
@@ -298,10 +322,9 @@ app.get('/cercle/:code', async (req, res) => {
             sectionTirage += `</div>`;
         }
 
-        // 2. Amélioration de l'Invitation : Texte WhatsApp rédigé de manière professionnelle
         let boutonWhatsAppHtml = '';
         if (participants.length < cercle.limite_participants) {
-            const texteWhatsApp = `Bonjour ! 👋 Tu as été invité à rejoindre le cercle de tontine sécurisé "${cercle.nom_cercle}".\n\n💰 Cotisation : ${cercle.montant_cotisation} FCFA par ${cercle.periode.toLowerCase()}.\n⚡ Clique ici pour régler ton inscription via Wave, Orange ou MTN Mobile Money et réserver ta place : https://tontine-mvp.onrender.com/rejoindre/${code}`;
+            const texteWhatsApp = `Bonjour ! 👋 Tu as été invité à rejoindre la tontine sécurisée "${cercle.nom_cercle}".\n\n🎟️ Droit d'adhésion unique : ${cercle.frais_adhesion || 0} FCFA\n💰 Cotisation : ${cercle.montant_cotisation} FCFA par ${cercle.periode.toLowerCase()}.\n⚡ Inscris-toi et paye en ligne ici : https://tontine-mvp.onrender.com/rejoindre/${code}`;
             const messageWhatsAppEncoded = encodeURIComponent(texteWhatsApp);
             boutonWhatsAppHtml = `<a class="btn-action" style="background:#25D366;" href="https://wa.me/?text=${messageWhatsAppEncoded}" target="_blank">🟢 Inviter des membres via WhatsApp</a>`;
         } else {
@@ -331,6 +354,7 @@ app.get('/cercle/:code', async (req, res) => {
                     <div class="info-box">
                         🎯 Tontine : <strong>${cercle.nom_cercle}</strong><br>
                         💰 Cotisation : <strong>${cercle.montant_cotisation} FCFA / ${cercle.periode.toLowerCase()}</strong><br>
+                        🎟️ Droit d'adhésion : <strong>${cercle.frais_adhesion || 0} FCFA (Unique)</strong><br>
                         👥 Membres : <strong>${participants.length} / ${cercle.limite_participants}</strong>
                     </div>
 
