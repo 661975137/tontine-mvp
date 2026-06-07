@@ -12,7 +12,20 @@ const clientEnregistre = new pg_1.Client({
     user: 'u0_a454'
 });
 clientEnregistre.connect();
-app.post('/creer-cercle', async (req, res) => {
+app.post('/creer-cercle', <div style="background: #ffffff; border-radius: 12px; padding: 20px; margin-top: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); text-align: center; font-family: Arial, sans-serif;">
+    <div style="font-size: 30px; margin-bottom: 10px;">💬</div>
+    <h3 style="margin: 0 0 10px 0; color: #2c3e50; font-size: 18px;">Groupe de discussion & Suivi</h3>
+    <p style="color: #7f8c8d; font-size: 14px; margin-bottom: 15px;">
+        Rejoignez le groupe WhatsApp officiel des membres pour suivre les tirages en direct et échanger avec l'administrateur.
+    </p>
+    
+    <a href="https://chat.whatsapp.com/TonLienDeGroupeIci" 
+       target="_blank" 
+       style="display: inline-flex; align-items: center; justify-content: center; background: #25D366; color: white; text-decoration: none; padding: 12px 20px; font-weight: bold; border-radius: 8px; font-size: 15px; box-shadow: 0 4px 10px rgba(37, 211, 102, 0.3);">
+       <span style="margin-right: 8px;">🔗</span> Rejoindre le groupe WhatsApp
+    </a>
+</div>
+ async (req, res) => {
     const { nom, montant } = req.body;
     if (!nom || !montant) {
         return res.status(400).json({ erreur: "Veuillez fournir un nom et un montant." });
