@@ -10,7 +10,7 @@ const pool = new Pool({
     ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
 });
 
-// Accueil
+// Accueil : Formulaire de création
 app.get('/', (req, res) => {
     res.send(`
         <!DOCTYPE html>
@@ -77,6 +77,7 @@ app.post('/creer-cercle', async (req, res) => {
     } catch (err) { res.status(500).json({ error: "Erreur" }); }
 });
 
+// Page pour rejoindre avec génération du reçu unique
 app.get('/rejoindre/:code', async (req, res) => {
     const code = req.params.code;
     try {
@@ -97,7 +98,7 @@ app.get('/rejoindre/:code', async (req, res) => {
             <html lang="fr">
             <head>
                 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>Rejoindre et Payer</title>
+                <title>Rejoindre la tontine</title>
                 <style>
                     body { font-family: Arial, sans-serif; text-align: center; background-color: #f4f4f9; padding: 20px; }
                     .card { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); display: inline-block; max-width: 400px; width: 100%; text-align: left; box-sizing: border-box; }
@@ -225,10 +226,7 @@ app.post('/admin-confirmer', async (req, res) => {
 app.post('/toggle-paiement', async (req, res) => {
     const { nom, code } = req.body;
     try {
-        await pool.query(
-            'UPDATE participants SET a_paye_periode = NOT a_paye_periode WHERE nom_participant = $1 AND code_invitation = $2',
-            [nom, code]
-        );
+        await pool.query('UPDATE participants SET a_paye_periode = NOT a_paye_periode WHERE nom_participant = $1 AND code_invitation = $2', [nom, code]);
         res.json({ success: true });
     } catch (err) { res.status(500).json({ error: "Erreur" }); }
 });
@@ -250,7 +248,6 @@ app.post('/lancer-tirage/:code', async (req, res) => {
     } catch (err) { res.status(500).json({ error: "Erreur" }); }
 });
 
-// Tableau de bord corrigé avec liaisons strictes des variables
 app.get('/cercle/:code', async (req, res) => {
     const code = req.params.code;
     try {
@@ -268,18 +265,7 @@ app.get('/cercle/:code', async (req, res) => {
         participants.forEach((p, index) => {
             const badgeColor = p.a_paye_periode ? '#2ecc71' : '#e74c3c';
             const badgeText = p.a_paye_periode ? '🟢 Payé' : '🔴 En retard';
-            
-            lignesTableau += `
-                <tr>
-                    <td style="font-weight:bold; color:#7f8c8d; width:40px;">${index + 1}</td>
-                    <td>👤 ${p.nom_participant}</td>
-                    <td>
-                        <span class="badge-paiement" onclick="switchPaiement('${p.nom_participant}')" style="background:${badgeColor}; color:white; padding:5px 10px; border-radius:20px; font-size:12px; font-weight:bold; cursor:pointer; display:inline-block;">
-                            ${badgeText}
-                        </span>
-                    </td>
-                </tr>
-            `;
+            lignesTableau += `<tr><td style="font-weight:bold; color:#7f8c8d; width:40px;">${index + 1}</td><td>👤 ${p.nom_participant}</td><td><span onclick="switchPaiement('${p.nom_participant}')" style="background:${badgeColor}; color:white; padding:5px 10px; border-radius:20px; font-size:12px; font-weight:bold; cursor:pointer; display:inline-block;">${badgeText}</span></td></tr>`;
         });
 
         let sectionTirage = '';
@@ -330,20 +316,12 @@ app.get('/cercle/:code', async (req, res) => {
                     ${sectionTirage}
                     <h3>👥 Membres et Cotisations :</h3>
                     <table>
-                        <thead>
-                            <tr>
-                                <th>N°</th>
-                                <th>Nom</th>
-                                <th>Statut Période</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${lignesTableau}
-                        </tbody>
+                        <thead><tr><th>N°</th><th>Nom</th><th>Statut Période</th></tr></thead>
+                        <tbody>${lignesTableau}</tbody>
                     </table>
                     ${boutonTirageHtml}
                     ${boutonWhatsAppHtml}
-                    <a href="/" style="display:block; text-align:center; color:#718096; margin-top:15px; text-decoration:none; font-size:14px;">➕ Créer une autre tontine</a>
+                    <a href="/" style="display:block; text-align:center; color:#718096; margin-top:15px; text-decoration:none; font-size:14px;">➕ Créer une another tontine</a>
                 </div>
                 <script>
                     async function lancerLeTirage() {
