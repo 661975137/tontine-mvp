@@ -93,7 +93,7 @@ app.get('/rejoindre/:code', async (req, res) => {
         }
 
         const totalReglement = Math.round(cercle.montant_cotisation * 1.01);
-        const transactionId = 'CP-' + Date.now();
+        const uniqueTxId = 'CP' + Math.floor(Date.now() / 1000) + Math.floor(Math.random() * 100);
 
         res.send(`
             <!DOCTYPE html>
@@ -118,7 +118,7 @@ app.get('/rejoindre/:code', async (req, res) => {
                     <div class="price-box">
                         💰 Cotisation : <strong>${cercle.montant_cotisation} FCFA</strong><br>
                         ⚡ Frais (1%) : <strong>${Math.round(cercle.montant_cotisation * 0.01)} FCFA</strong><br>
-                        🛒 Total (Wave/Orange/MTN/Moov) : <strong style="color:#e67e22;">${totalReglement} FCFA</strong>
+                        🛒 Total à régler : <strong style="color:#e67e22;">${totalReglement} FCFA</strong>
                     </div>
 
                     <p>👥 Places disponibles : <strong>${placesDisponibles} / ${cercle.limite_participants}</strong></p>
@@ -139,6 +139,11 @@ app.get('/rejoindre/:code', async (req, res) => {
                         
                         if(!prenom || !email) return alert("Remplis ton prénom et ton adresse email !");
 
+                        // On verifie si le SDK CinetPay s'est bien charge
+                        if (typeof CinetPay === 'undefined') {
+                            return alert("Erreur : Le script de paiement CinetPay ne s'est pas chargé correctement. Vérifie ta connexion internet.");
+                        }
+
                         try {
                             CinetPay.setConfig({
                                 apikey: '${process.env.CINETPAY_API_KEY || ""}',
@@ -147,7 +152,7 @@ app.get('/rejoindre/:code', async (req, res) => {
                             });
 
                             CinetPay.getCheckout({
-                                transaction_id: '${transactionId}',
+                                transaction_id: '${uniqueTxId}',
                                 amount: ${totalReglement},
                                 currency: 'XOF',
                                 channels: 'ALL',
@@ -155,7 +160,7 @@ app.get('/rejoindre/:code', async (req, res) => {
                                 customer_name: prenom,
                                 customer_surname: prenom,
                                 customer_email: email,
-                                customer_phone_number: '0700000000',
+                                customer_phone_number: '0707070707',
                                 customer_address: 'Abidjan',
                                 customer_city: 'Abidjan',
                                 customer_country: 'CI',
@@ -172,15 +177,16 @@ app.get('/rejoindre/:code', async (req, res) => {
                                     });
                                     window.location.href = '/cercle/${code}';
                                 } else {
-                                    alert("Paiement non finalisé : " + data.status);
+                                    alert("Statut retourné : " + data.status);
                                 }
                             });
 
                             CinetPay.onError(function(data) {
-                                alert("Erreur d'initialisation CinetPay. Vérifie tes clés API.");
+                                alert("Erreur CinetPay : " + JSON.stringify(data.description || data));
                             });
+
                         } catch(e) {
-                            alert("Erreur technique de chargement du guichet.");
+                            alert("Erreur d'initialisation : " + e.message);
                         }
                     }
                 </script>
@@ -198,7 +204,7 @@ app.post('/valider-inscription-directe', async (req, res) => {
             await pool.query('INSERT INTO participants (nom_participant, code_invitation, a_paye_periode) VALUES ($1, $2, TRUE)', [nom, code]);
         }
         res.json({ success: true });
-    } catch (err) { res.status(500).json({ error: "Erreur d'écriture" }); }
+    } catch (err) { res.status(500).json({ error: "Erreur" }); }
 });
 
 app.post('/toggle-paiement', async (req, res) => {
@@ -226,6 +232,7 @@ app.post('/lancer-tirage/:code', async (req, res) => {
     } catch (err) { res.status(500).json({ error: "Erreur" }); }
 });
 
+// Tableau de bord
 app.get('/cercle/:code', async (req, res) => {
     const code = req.params.code;
     try {
@@ -325,4 +332,4 @@ app.get('/cercle/:code', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => { console.log(`🚀 Production active sur ${PORT}`); });
+app.listen(PORT, () => { console.log(`🚀 Serveur en ligne`); });
