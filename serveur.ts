@@ -74,10 +74,9 @@ app.post('/creer-cercle', async (req, res) => {
             [nom, montant, codeUnique, periode || 'Mois', limite || 10]
         );
         res.json({ codeUnique });
-    } catch (err) { res.status(500).json({ error: "Erreur" }); }
+    } catch (err) { res.status(500).json({ error: "Erreur BDD" }); }
 });
 
-// Page de paiement mise à jour avec le script officiel CinetPay
 app.get('/rejoindre/:code', async (req, res) => {
     const code = req.params.code;
     try {
@@ -94,7 +93,7 @@ app.get('/rejoindre/:code', async (req, res) => {
         }
 
         const totalReglement = Math.round(cercle.montant_cotisation * 1.01);
-        const transactionId = 'CP-' + Math.floor(100000 + Math.random() * 900000);
+        const transactionId = 'CP-' + Date.now();
 
         res.send(`
             <!DOCTYPE html>
@@ -107,7 +106,7 @@ app.get('/rejoindre/:code', async (req, res) => {
                     body { font-family: Arial, sans-serif; text-align: center; background-color: #f4f4f9; padding: 20px; }
                     .card { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); display: inline-block; max-width: 400px; width: 100%; text-align: left; box-sizing: border-box; }
                     input { width: 100%; padding: 12px; margin: 10px 0 15px 0; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; font-size: 16px; }
-                    #pay-button { background-color: #3498db; color: white; border: none; padding: 14px; border-radius: 6px; font-weight: bold; width: 100%; font-size: 16px; cursor: pointer; }
+                    #pay-button { background-color: #3498db; color: white; border: none; padding: 14px; border-radius: 6px; font-weight: bold; width: 100%; font-size: 16px; cursor: pointer; width: 100%; }
                     .price-box { background: #fef9e7; border-left: 5px solid #f1c40f; padding: 12px; margin-bottom: 20px; border-radius: 6px; }
                 </style>
             </head>
@@ -140,47 +139,49 @@ app.get('/rejoindre/:code', async (req, res) => {
                         
                         if(!prenom || !email) return alert("Remplis ton prénom et ton adresse email !");
 
-                        CinetPay.setConfig({
-                            apikey: '${process.env.CINETPAY_API_KEY}',
-                            site_id: '${process.env.CINETPAY_SITE_ID}',
-                            notify_url: 'https://tontine-mvp.onrender.com/valider-inscription-directe'
-                        });
+                        try {
+                            CinetPay.setConfig({
+                                apikey: '${process.env.CINETPAY_API_KEY || ""}',
+                                site_id: '${process.env.CINETPAY_SITE_ID || ""}',
+                                notify_url: 'https://tontine-mvp.onrender.com/valider-inscription-directe'
+                            });
 
-                        CinetPay.getCheckout({
-                            transaction_id: '${transactionId}',
-                            amount: ${totalReglement},
-                            currency: 'XOF',
-                            channels: 'ALL',
-                            description: 'Cotisation Tontine - ' + prenom,
-                            customer_name: prenom,
-                            customer_surname: prenom,
-                            customer_email: email,
-                            customer_phone_number: '0700000000',
-                            customer_address: 'Abidjan',
-                            customer_city: 'Abidjan',
-                            customer_country: 'CI',
-                            customer_state: 'CI',
-                            customer_zip_code: '00225'
-                        });
+                            CinetPay.getCheckout({
+                                transaction_id: '${transactionId}',
+                                amount: ${totalReglement},
+                                currency: 'XOF',
+                                channels: 'ALL',
+                                description: 'Cotisation Tontine - ' + prenom,
+                                customer_name: prenom,
+                                customer_surname: prenom,
+                                customer_email: email,
+                                customer_phone_number: '0700000000',
+                                customer_address: 'Abidjan',
+                                customer_city: 'Abidjan',
+                                customer_country: 'CI',
+                                customer_state: 'CI',
+                                customer_zip_code: '00225'
+                            });
 
-                        CinetPay.waitResponse(async function(data) {
-                            if (data.status === "REFUSED") {
-                                alert("Paiement annulé ou refusé.");
-                            } else if (data.status === "ACCEPTED") {
-                                // Validation immediate en BDD après accord du guichet CinetPay
-                                const validation = await fetch('/valider-inscription-directe', {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ nom: prenom, code: '${code}' })
-                                });
-                                window.location.href = '/cercle/${code}';
-                            }
-                        });
+                            CinetPay.waitResponse(async function(data) {
+                                if (data.status === "ACCEPTED") {
+                                    await fetch('/valider-inscription-directe', {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ nom: prenom, code: '${code}' })
+                                    });
+                                    window.location.href = '/cercle/${code}';
+                                } else {
+                                    alert("Paiement non finalisé : " + data.status);
+                                }
+                            });
 
-                        CinetPay.onError(function(data) {
-                            console.error(data);
-                            alert("Erreur CinetPay: " + data.description);
-                        });
+                            CinetPay.onError(function(data) {
+                                alert("Erreur d'initialisation CinetPay. Vérifie tes clés API.");
+                            });
+                        } catch(e) {
+                            alert("Erreur technique de chargement du guichet.");
+                        }
                     }
                 </script>
             </body>
@@ -197,7 +198,7 @@ app.post('/valider-inscription-directe', async (req, res) => {
             await pool.query('INSERT INTO participants (nom_participant, code_invitation, a_paye_periode) VALUES ($1, $2, TRUE)', [nom, code]);
         }
         res.json({ success: true });
-    } catch (err) { res.status(500).json({ error: "Erreur" }); }
+    } catch (err) { res.status(500).json({ error: "Erreur d'écriture" }); }
 });
 
 app.post('/toggle-paiement', async (req, res) => {
@@ -225,7 +226,6 @@ app.post('/lancer-tirage/:code', async (req, res) => {
     } catch (err) { res.status(500).json({ error: "Erreur" }); }
 });
 
-// Tableau de bord
 app.get('/cercle/:code', async (req, res) => {
     const code = req.params.code;
     try {
@@ -250,7 +250,7 @@ app.get('/cercle/:code', async (req, res) => {
         let boutonTirageHtml = `<button class="btn-action" style="background:#f39c12;" onclick="lancerLeTirage()">🎲 Lancer le tirage au sort</button>`;
 
         if (ordreTirage.length > 0) {
-            boutonTirageHtml = `<div style="text-align:center; color:#27ae60; font-weight:bold; margin-top:15px; font-size:15px;">🔒 Ordre de tirage verrouillé en Base de données Cloud</div>`;
+            boutonTirageHtml = `<div style="text-align:center; color:#27ae60; font-weight:bold; margin-top:15px; font-size:15px;">🔒 Ordre de tirage verrouillé</div>`;
             sectionTirage = `<h3>📅 Calendrier des Bénéficiaires :</h3><div style="background:#fef9e7; padding:15px; border-radius:8px; border-left:5px solid #f39c12; margin-bottom:20px;">`;
             ordreTirage.forEach((nom, index) => {
                 sectionTirage += `🔹 <strong>${cercle.periode} ${index + 1}</strong> : ${nom} (Gagne ${participants.length * cercle.montant_cotisation} FCFA) <br>`;
@@ -263,7 +263,7 @@ app.get('/cercle/:code', async (req, res) => {
             const messageWhatsApp = encodeURIComponent(`Rejoins ma tontine "${cercle.nom_cercle}" : https://tontine-mvp.onrender.com/rejoindre/${code}`);
             boutonWhatsAppHtml = `<a class="btn-action" style="background:#25D366;" href="https://wa.me/?text=${messageWhatsApp}" target="_blank">🟢 Inviter via WhatsApp</a>`;
         } else {
-            boutonWhatsAppHtml = `<div style="text-align:center; background:#e2e8f0; color:#4a5568; padding:12px; border-radius:6px; font-weight:bold; margin-top:10px;">👥 Tontine complète (${participants.length}/${cercle.limite_participants}) - Invitations fermées</div>`;
+            boutonWhatsAppHtml = `<div style="text-align:center; background:#e2e8f0; color:#4a5568; padding:12px; border-radius:6px; font-weight:bold; margin-top:10px;">👥 Tontine complète (${participants.length}/${cercle.limite_participants})</div>`;
         }
 
         res.send(`
@@ -325,4 +325,4 @@ app.get('/cercle/:code', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => { console.log(`🚀 Serveur CinetPay en ligne sur ${PORT}`); });
+app.listen(PORT, () => { console.log(`🚀 Production active sur ${PORT}`); });
