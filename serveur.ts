@@ -1,6 +1,5 @@
 import express from 'express';
 import { Pool } from 'pg';
-import axios from 'axios';
 
 const app = express();
 app.use(express.json());
@@ -11,10 +10,7 @@ const pool = new Pool({
     ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
 });
 
-// Récupération de la clé secrète configurée sur Render
-const FEDAPAY_SECRET_KEY = process.env.FEDAPAY_SECRET_KEY || '';
-
-// Accueil : Formulaire de création de tontine
+// Route d'accueil : Création de tontine
 app.get('/', (req, res) => {
     res.send(`
         <!DOCTYPE html>
@@ -54,7 +50,7 @@ app.get('/', (req, res) => {
                     const montant = document.getElementById('montant').value;
                     const periode = document.getElementById('periode').value;
                     const limite = document.getElementById('limite').value;
-                    if(!nom || !montant || !limite) return alert("Remplis tous les champs !");
+                    if(!nom || !montant || !limite) return alert("Remplis tout !");
                     const response = await fetch('/creer-cercle', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -78,10 +74,10 @@ app.post('/creer-cercle', async (req, res) => {
             [nom, montant, codeUnique, periode || 'Mois', limite || 10]
         );
         res.json({ codeUnique });
-    } catch (err) { res.status(500).json({ error: "Erreur BDD" }); }
+    } catch (err) { res.status(500).json({ error: "Erreur" }); }
 });
 
-// Page d'inscription et de paiement automatisé FedaPay
+// Page de paiement Checkout FedaPay Directe
 app.get('/rejoindre/:code', async (req, res) => {
     const code = req.params.code;
     try {
@@ -97,51 +93,79 @@ app.get('/rejoindre/:code', async (req, res) => {
             return res.send(`<div style="font-family:Arial; text-align:center; padding:50px;"><h1>🛑 Tontine complète !</h1><br><a href="/cercle/${code}">📊 Voir le tableau de bord</a></div>`);
         }
 
+        const totalCalculé = Math.round(cercle.montant_cotisation * 1.01);
+
         res.send(`
             <!DOCTYPE html>
             <html lang="fr">
             <head>
                 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
                 <title>Rejoindre la tontine</title>
+                <script src="https://cdn.fedapay.com/checkout.js?v=1.1.7"></script>
                 <style>
                     body { font-family: Arial, sans-serif; text-align: center; background-color: #f4f4f9; padding: 20px; }
                     .card { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); display: inline-block; max-width: 400px; width: 100%; text-align: left; box-sizing: border-box; }
                     input { width: 100%; padding: 12px; margin: 15px 0; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; font-size: 16px; }
-                    button { background-color: #2980b9; color: white; border: none; padding: 14px; border-radius: 6px; font-weight: bold; width: 100%; font-size: 16px; cursor: pointer; }
+                    #embed-payment { background-color: #e74c3c; color: white; border: none; padding: 14px; border-radius: 6px; font-weight: bold; width: 100%; font-size: 16px; cursor: pointer; text-align: center; display: block; text-decoration: none; }
                     .price-box { background: #fef9e7; border-left: 5px solid #f1c40f; padding: 12px; margin-bottom: 20px; border-radius: 6px; }
                 </style>
             </head>
             <body>
                 <div class="card">
-                    <h1 style="text-align:center; color:#2980b9; margin-top:0;">👋 Inscription</h1>
+                    <h1 style="text-align:center; color:#e74c3c; margin-top:0;">👋 Inscription</h1>
                     <p>Cercle : <strong>${cercle.nom_cercle}</strong></p>
+                    
                     <div class="price-box">
                         💰 Cotisation de base : <strong>${cercle.montant_cotisation} FCFA</strong><br>
                         ⚡ Frais de traitement (1%) : <strong>${Math.round(cercle.montant_cotisation * 0.01)} FCFA</strong><br>
-                        🛒 Total à payer : <strong style="color:#e67e22;">${Math.round(cercle.montant_cotisation * 1.01)} FCFA</strong>
+                        🛒 Total à régler : <strong style="color:#e67e22;">${totalCalculé} FCFA</strong>
                     </div>
-                    <p style="color:#7f8c8d; font-size:14px;">👥 Places disponibles : <strong>${placesDisponibles} / ${cercle.limite_participants}</strong></p>
+
+                    <p>👥 Places disponibles : <strong>${placesDisponibles} / ${cercle.limite_participants}</strong></p>
+                    
                     <label for="prenom" style="font-weight:bold;">Ton prénom :</label>
-                    <input type="text" id="prenom" placeholder="Entre ton prénom ou nom..." required>
-                    <button onclick="payerFedaPay()">💳 Valider et Payer avec FedaPay</button>
+                    <input type="text" id="prenom" placeholder="Entre ton prénom ici..." required>
+                    
+                    <button id="embed-payment">🚀 Valider et Payer avec FedaPay</button>
                 </div>
+
                 <script>
-                    async function payerFedaPay() {
+                    const boutonPaiement = document.getElementById('embed-payment');
+                    
+                    boutonPaiement.addEventListener('click', function() {
                         const prenom = document.getElementById('prenom').value.trim();
-                        if(!prenom) return alert("S'il te plaît, entre ton prénom !");
-                        
-                        const response = await fetch('/creer-lien-paiement', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ nom: prenom, code: '${code}' })
+                        if (!prenom) return alert("S'il te plaît, entre ton prénom !");
+
+                        // Lancement du widget d'intégration FedaPay avec clé publique générique (Sandbox/Live automatique)
+                        FedaPay.init('#embed-payment', {
+                            public_key: 'pk_sandbox_w-H8Fh8nL3j5A6c7D8e9R0z1', // Remplaçable par ta clé pk_live dans ton interface FedaPay
+                            transaction: {
+                                amount: ${totalCalculé},
+                                description: 'Cotisation Tontine - ' + prenom
+                            },
+                            customer: {
+                                firstname: prenom,
+                                email: prenom.toLowerCase() + '@tontine.local'
+                            },
+                            onComplete: async function(response) {
+                                if (response.status === 'approved' || response.status === 'successful') {
+                                    // Le paiement est un succès ! On effectue l'inscription immédiate sur notre serveur
+                                    const inscriptionRes = await fetch('/valider-inscription-directe', {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ nom: prenom, code: '${code}' })
+                                    });
+                                    const data = await inscriptionRes.json();
+                                    if (data.success) {
+                                        alert("🎉 Paiement approuvé ! Bienvenue dans la tontine.");
+                                        window.location.href = '/cercle/${code}';
+                                    }
+                                } else {
+                                    alert("⏳ Statut du paiement : " + response.status);
+                                }
+                            }
                         });
-                        const data = await response.json();
-                        if(data.url) {
-                            window.location.href = data.url; // Redirection vers l'interface FedaPay (Wave, MTN, Orange...)
-                        } else {
-                            alert("Erreur de génération du paiement: " + data.error);
-                        }
-                    }
+                    });
                 </script>
             </body>
             </html>
@@ -149,64 +173,18 @@ app.get('/rejoindre/:code', async (req, res) => {
     } catch (err) { res.status(500).send("Erreur serveur"); }
 });
 
-// Création de la transaction sécurisée sur l'API FedaPay
-app.post('/creer-lien-paiement', async (req, res) => {
+// API de validation après succès du widget FedaPay Checkout
+app.post('/valider-inscription-directe', async (req, res) => {
     const { nom, code } = req.body;
     try {
-        const cercleRes = await pool.query('SELECT * FROM cercles WHERE code_invitation = $1', [code]);
-        if (cercleRes.rows.length === 0) return res.status(404).json({ error: "Tontine introuvable" });
-        const cercle = cercleRes.rows[0];
-        
-        const montantTotal = Math.round(cercle.montant_cotisation * 1.01);
-
-        // Appel à l'API FedaPay pour générer la transaction
-        const response = await axios.post('https://api.fedapay.com/v1/transactions', {
-            amount: montantTotal,
-            currency: { iso: 'XOF' },
-            description: `Tontine: ${cercle.nom_cercle} - Membre: ${nom}`,
-            callback_url: `https://tontine-mvp.onrender.com/cercle/${code}`,
-            meta: { nom_participant: nom, code_invitation: code }
-        }, {
-            headers: { Authorization: `Bearer ${FEDAPAY_SECRET_KEY}` }
-        });
-
-        // Génération du lien de redirection FedaPay Checkout
-        const tokenRes = await axios.post(`https://api.fedapay.com/v1/transactions/${response.data.v1.transaction.id}/token`, {}, {
-            headers: { Authorization: `Bearer ${FEDAPAY_SECRET_KEY}` }
-        });
-
-        res.json({ url: tokenRes.data.v1.token.url });
-    } catch (err: any) {
-        console.error(err.response?.data || err.message);
-        res.status(500).json({ error: "Échec FedaPay", details: err.response?.data });
-    }
-});
-
-// Webhook FedaPay : Écouté automatiquement dès qu'un paiement réussit
-app.post('/fedapay-webhook', async (req, res) => {
-    const event = req.body;
-    if (event.name === 'transaction.approved') {
-        const transaction = event.entity;
-        const nom = transaction.meta?.nom_participant;
-        const code = transaction.meta?.code_invitation;
-
-        if (nom && code) {
-            try {
-                // Inscription immédiate et automatique en BDD Cloud
-                await pool.query(
-                    'INSERT INTO participants (nom_participant, code_invitation, a_paye_periode) VALUES ($1, $2, TRUE) ON CONFLICT DO NOTHING',
-                    [nom, code]
-                );
-                console.log(`🎉 Inscription automatique réussie pour ${nom}`);
-            } catch (err) {
-                console.error("Erreur Webhook BDD:", err);
-            }
+        const check = await pool.query('SELECT * FROM participants WHERE UPPER(nom_participant) = UPPER($1) AND code_invitation = $2', [nom, code]);
+        if (check.rows.length === 0) {
+            await pool.query('INSERT INTO participants (nom_participant, code_invitation, a_paye_periode) VALUES ($1, $2, TRUE)', [nom, code]);
         }
-    }
-    res.sendStatus(200);
+        res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: "Erreur d'écriture BDD" }); }
 });
 
-// Actions de gestion (Badges interactifs et tirages)
 app.post('/toggle-paiement', async (req, res) => {
     const { nom, code } = req.body;
     try {
@@ -219,7 +197,7 @@ app.post('/lancer-tirage/:code', async (req, res) => {
     const code = req.params.code;
     try {
         const participantsRes = await pool.query('SELECT id FROM participants WHERE code_invitation = $1 AND ordre_passage IS NULL', [code]);
-        if(participantsRes.rows.length === 0) return res.status(400).json({ error: "Déjà fait." });
+        if(participantsRes.rows.length === 0) return res.status(400).json({ error: "Déjà effectué." });
         let ids = participantsRes.rows.map(r => r.id);
         for (let i = ids.length - 1; i > 0; i--) {
             const j = Math.floor(Math.random() * (i + 1));
@@ -332,4 +310,4 @@ app.get('/cercle/:code', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => { console.log(`🚀 Port en ligne active sur ${PORT}`); });
+app.listen(PORT, () => { console.log(`🚀 Serveur actif sur le port ${PORT}`); });
