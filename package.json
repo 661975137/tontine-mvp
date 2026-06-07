@@ -1,5 +1,6 @@
 {
   "dependencies": {
+    "axios": "^1.17.0",
     "express": "^5.2.1",
     "fedapay": "^1.2.5",
     "pg": "^8.21.0"

@@ -1,5 +1,6 @@
 import express from 'express';
 import { Pool } from 'pg';
+import axios from 'axios';
 
 const app = express();
 app.use(express.json());
@@ -93,7 +94,6 @@ app.get('/rejoindre/:code', async (req, res) => {
         }
 
         const totalReglement = Math.round(cercle.montant_cotisation * 1.01);
-        const uniqueTxId = 'CP' + Math.floor(Date.now() / 1000) + Math.floor(Math.random() * 100);
 
         res.send(`
             <!DOCTYPE html>
@@ -101,7 +101,6 @@ app.get('/rejoindre/:code', async (req, res) => {
             <head>
                 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
                 <title>Rejoindre la tontine</title>
-                <script src="https://cdn.cinetpay.com/seamless/main.js"></script>
                 <style>
                     body { font-family: Arial, sans-serif; text-align: center; background-color: #f4f4f9; padding: 20px; }
                     .card { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); display: inline-block; max-width: 400px; width: 100%; text-align: left; box-sizing: border-box; }
@@ -129,64 +128,40 @@ app.get('/rejoindre/:code', async (req, res) => {
                     <label for="email" style="font-weight:bold;">📧 Ton Email :</label>
                     <input type="email" id="email" placeholder="Ex: tonemail@gmail.com" required>
                     
-                    <button id="pay-button" onclick="lancerCinetPay()">🚀 Payer via CinetPay</button>
+                    <button id="pay-button" onclick="genererLienCinetPay()">🚀 Payer via CinetPay</button>
                 </div>
 
                 <script>
-                    function lancerCinetPay() {
+                    async function genererLienCinetPay() {
                         const prenom = document.getElementById('prenom').value.trim();
                         const email = document.getElementById('email').value.trim();
                         
                         if(!prenom || !email) return alert("Remplis ton prénom et ton adresse email !");
-
-                        // On verifie si le SDK CinetPay s'est bien charge
-                        if (typeof CinetPay === 'undefined') {
-                            return alert("Erreur : Le script de paiement CinetPay ne s'est pas chargé correctement. Vérifie ta connexion internet.");
-                        }
+                        
+                        const btn = document.getElementById('pay-button');
+                        btn.innerText = "⏳ Génération du guichet sécurisé...";
+                        btn.disabled = true;
 
                         try {
-                            CinetPay.setConfig({
-                                apikey: '${process.env.CINETPAY_API_KEY || ""}',
-                                site_id: '${process.env.CINETPAY_SITE_ID || ""}',
-                                notify_url: 'https://tontine-mvp.onrender.com/valider-inscription-directe'
+                            const response = await fetch('/creer-session-cinetpay', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ nom: prenom, email: email, montant: ${totalReglement}, code: '${code}' })
                             });
-
-                            CinetPay.getCheckout({
-                                transaction_id: '${uniqueTxId}',
-                                amount: ${totalReglement},
-                                currency: 'XOF',
-                                channels: 'ALL',
-                                description: 'Cotisation Tontine - ' + prenom,
-                                customer_name: prenom,
-                                customer_surname: prenom,
-                                customer_email: email,
-                                customer_phone_number: '0707070707',
-                                customer_address: 'Abidjan',
-                                customer_city: 'Abidjan',
-                                customer_country: 'CI',
-                                customer_state: 'CI',
-                                customer_zip_code: '00225'
-                            });
-
-                            CinetPay.waitResponse(async function(data) {
-                                if (data.status === "ACCEPTED") {
-                                    await fetch('/valider-inscription-directe', {
-                                        method: 'POST',
-                                        headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({ nom: prenom, code: '${code}' })
-                                    });
-                                    window.location.href = '/cercle/${code}';
-                                } else {
-                                    alert("Statut retourné : " + data.status);
-                                }
-                            });
-
-                            CinetPay.onError(function(data) {
-                                alert("Erreur CinetPay : " + JSON.stringify(data.description || data));
-                            });
-
+                            const data = await response.json();
+                            
+                            if(data.url) {
+                                // Redirection immédiate et fluide vers CinetPay
+                                window.location.href = data.url;
+                            } else {
+                                alert("Erreur serveur : " + (data.error || "Impossible de générer le lien."));
+                                btn.innerText = "🚀 Payer via CinetPay";
+                                btn.disabled = false;
+                            }
                         } catch(e) {
-                            alert("Erreur d'initialisation : " + e.message);
+                            alert("Une erreur est survenue.");
+                            btn.innerText = "🚀 Payer via CinetPay";
+                            btn.disabled = false;
                         }
                     }
                 </script>
@@ -196,15 +171,65 @@ app.get('/rejoindre/:code', async (req, res) => {
     } catch (err) { res.status(500).send("Erreur"); }
 });
 
-app.post('/valider-inscription-directe', async (req, res) => {
-    const { nom, code } = req.body;
+// Route serveur pour appeler l'API de redirection CinetPay
+app.post('/creer-session-cinetpay', async (req, res) => {
+    const { nom, email, montant, code } = req.body;
+    const transactionId = 'CP' + Date.now();
+
+    try {
+        const response = await axios.post('https://api-checkout.cinetpay.com/v2/payment', {
+            apikey: process.env.CINETPAY_API_KEY,
+            site_id: process.env.CINETPAY_SITE_ID,
+            transaction_id: transactionId,
+            amount: montant,
+            currency: 'XOF',
+            alternative_currency: '',
+            description: 'Cotisation Tontine - ' + nom,
+            customer_id: 'ID' + Math.floor(Math.random() * 10000),
+            customer_name: nom,
+            customer_surname: nom,
+            customer_email: email,
+            customer_phone_number: '0707070707',
+            customer_address: 'Abidjan',
+            customer_city: 'Abidjan',
+            customer_country: 'CI',
+            customer_state: 'CI',
+            customer_zip_code: '00225',
+            notify_url: 'https://tontine-mvp.onrender.com/valider-inscription-directe',
+            return_url: `https://tontine-mvp.onrender.com/confirmation-cinetpay?nom=${encodeURIComponent(nom)}&code=${code}`,
+            channels: 'ALL',
+            metadata: JSON.stringify({ nom, code })
+        }, {
+            headers: { 'Content-Type': 'application/json' },
+            timeout: 8000
+        });
+
+        if (response.data && response.data.code === '00' && response.data.data && response.data.data.payment_url) {
+            res.json({ url: response.data.data.payment_url });
+        } else {
+            console.error("Erreur de réponse CinetPay :", response.data);
+            res.json({ error: response.data.description || "Erreur de l'API CinetPay." });
+        }
+    } catch (err: any) {
+        console.error("Erreur d'appel API CinetPay :", err.message);
+        res.json({ error: "Échec de connexion aux serveurs de CinetPay." });
+    }
+});
+
+// Route de retour après paiement réussi
+app.get('/confirmation-cinetpay', async (req, res) => {
+    const { nom, code } = req.query as { nom: string; code: string };
     try {
         const check = await pool.query('SELECT * FROM participants WHERE UPPER(nom_participant) = UPPER($1) AND code_invitation = $2', [nom, code]);
         if (check.rows.length === 0) {
             await pool.query('INSERT INTO participants (nom_participant, code_invitation, a_paye_periode) VALUES ($1, $2, TRUE)', [nom, code]);
         }
-        res.json({ success: true });
-    } catch (err) { res.status(500).json({ error: "Erreur" }); }
+        res.send(`<div style="font-family:Arial; text-align:center; padding:50px;"><h1 style="color:#2ecc71;">🎉 Paiement Accepté avec succès !</h1><br><a href="/cercle/${code}">📊 Accéder au Tableau de bord</a></div>`);
+    } catch (err) { res.status(500).send("Erreur"); }
+});
+
+app.post('/valider-inscription-directe', async (req, res) => {
+    res.status(200).send('Notification recue');
 });
 
 app.post('/toggle-paiement', async (req, res) => {
@@ -232,7 +257,6 @@ app.post('/lancer-tirage/:code', async (req, res) => {
     } catch (err) { res.status(500).json({ error: "Erreur" }); }
 });
 
-// Tableau de bord
 app.get('/cercle/:code', async (req, res) => {
     const code = req.params.code;
     try {
