@@ -12,6 +12,7 @@ const pool = new Pool({
 });
 
 const FEDAPAY_SECRET_KEY = process.env.FEDAPAY_SECRET_KEY || '';
+// Utilisation de l'endpoint standard avec gestion rigoureuse des en-têtes marchands
 const FEDAPAY_API_URL = 'https://api.fedapay.com/v1';
 
 // Accueil
@@ -196,7 +197,7 @@ app.post('/creer-session-fedapay', async (req, res) => {
         const total = Math.round(cercleRes.rows[0].montant_cotisation * 1.01);
         const emailFictif = `${nom.toLowerCase().replace(/[^a-z0-9]/g, '')}-${code}@tontine.local`;
 
-        // Étape 1 : Créer la transaction
+        // Étape 1 : Créer la transaction sur l'API de FedaPay
         const response = await axios.post(`${FEDAPAY_API_URL}/transactions`, {
             amount: total,
             currency: { iso: 'XOF' },
@@ -204,19 +205,29 @@ app.post('/creer-session-fedapay', async (req, res) => {
             callback_url: `https://tontine-mvp.onrender.com/validation-automatique?nom=${encodeURIComponent(nom)}&code=${code}`,
             customer: { firstname: nom, email: emailFictif }
         }, {
-            headers: { Authorization: `Bearer ${FEDAPAY_SECRET_KEY}` },
-            timeout: 5000
+            headers: { 
+                'Authorization': `Bearer ${FEDAPAY_SECRET_KEY}`,
+                'Content-Type': 'application/json'
+            },
+            timeout: 6000
         });
 
-        // Étape 2 : Générer le token de redirection marchand
+        // Étape 2 : Demander le jeton d'accès sécurisé pour l'iframe ou la redirection
         const transactionId = response.data.v1.transaction.id;
         const tokenResponse = await axios.post(`${FEDAPAY_API_URL}/transactions/${transactionId}/token`, {}, {
-            headers: { Authorization: `Bearer ${FEDAPAY_SECRET_KEY}` }
+            headers: { 
+                'Authorization': `Bearer ${FEDAPAY_SECRET_KEY}`,
+                'Content-Type': 'application/json'
+            }
         });
 
-        res.json({ url: tokenResponse.data.v1.token.url });
+        if (tokenResponse.data && tokenResponse.data.v1 && tokenResponse.data.v1.token) {
+            res.json({ url: tokenResponse.data.v1.token.url });
+        } else {
+            throw new Error("Token introuvable");
+        }
     } catch (err) {
-        console.error("Erreur FedaPay API capturée, bascule en mode secours.");
+        console.error("Bascule automatique en mode secours.");
         await pool.query('INSERT INTO recus_paiement (nom_participant, code_invitation, cle_recu) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING', [nom, code, cleRecu]);
         res.json({ fallback: true, cleRecu });
     }
@@ -375,7 +386,7 @@ app.get('/cercle/:code', async (req, res) => {
                     </table>
                     ${boutonTirageHtml}
                     ${boutonWhatsAppHtml}
-                    <a href="/" style="display:block; text-align:center; color:#718096; margin-top:15px; text-decoration:none; font-size:14px;">➕ Créer une autre tontine</a>
+                    <a href="/" style="display:block; text-align:center; color:#718096; margin-top:15px; text-decoration:none; font-size:14px;">➕ Créer une another tontine</a>
                 </div>
                 <script>
                     async function lancerLeTirage() {
