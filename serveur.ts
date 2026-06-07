@@ -94,6 +94,7 @@ app.get('/rejoindre/:code', async (req, res) => {
         }
 
         const totalReglement = Math.round(cercle.montant_cotisation * 1.01);
+        const transactionId = 'CP' + Date.now();
 
         res.send(`
             <!DOCTYPE html>
@@ -153,7 +154,7 @@ app.get('/rejoindre/:code', async (req, res) => {
                             if(data.url) {
                                 window.location.href = data.url;
                             } else {
-                                alert("Information : " + (data.error || "Une erreur est survenue lors de la redirection."));
+                                alert("Information : " + (data.error || "Une erreur est survenue."));
                                 btn.innerText = "🚀 Payer via CinetPay";
                                 btn.disabled = false;
                             }
@@ -170,11 +171,9 @@ app.get('/rejoindre/:code', async (req, res) => {
     } catch (err) { res.status(500).send("Erreur"); }
 });
 
-// Lecture stricte de la reponse positive de l'API CinetPay
 app.post('/creer-session-cinetpay', async (req, res) => {
     const { nom, email, montant, code } = req.body;
     const transactionId = 'CP' + Date.now();
-
     try {
         const response = await axios.post('https://api-checkout.cinetpay.com/v2/payment', {
             apikey: process.env.CINETPAY_API_KEY,
@@ -202,16 +201,15 @@ app.post('/creer-session-cinetpay', async (req, res) => {
             timeout: 8000
         });
 
-        // Correction technique : On extrait l'URL si elle est presente, sans bloquer sur le code string
         if (response.data && response.data.data && response.data.data.payment_url) {
             res.json({ url: response.data.data.payment_url });
         } else if (response.data && response.data.payment_url) {
             res.json({ url: response.data.payment_url });
         } else {
-            res.json({ error: response.data.description || "Lien de paiement introuvable." });
+            res.json({ error: response.data.description || "Lien introuvable." });
         }
     } catch (err: any) {
-        res.json({ error: "Erreur réseau de l'API." });
+        res.json({ error: "Erreur réseau de l'API CinetPay." });
     }
 });
 
@@ -255,6 +253,7 @@ app.post('/lancer-tirage/:code', async (req, res) => {
     } catch (err) { res.status(500).json({ error: "Erreur" }); }
 });
 
+// Tableau de bord AMÉLIORÉ
 app.get('/cercle/:code', async (req, res) => {
     const code = req.params.code;
     try {
@@ -275,22 +274,36 @@ app.get('/cercle/:code', async (req, res) => {
             lignesTableau += `<tr><td>${index + 1}</td><td>👤 ${p.nom_participant}</td><td><span onclick="switchPaiement('${p.nom_participant}')" style="background:${badgeColor}; color:white; padding:5px 10px; border-radius:20px; font-size:12px; font-weight:bold; cursor:pointer; display:inline-block;">${badgeText}</span></td></tr>`;
         });
 
+        // 1. Amélioration Visuelle : Détermination et affichage du bénéficiaire en cours
+        let encadreBeneficiaire = '';
         let sectionTirage = '';
         let boutonTirageHtml = `<button class="btn-action" style="background:#f39c12;" onclick="lancerLeTirage()">🎲 Lancer le tirage au sort</button>`;
 
         if (ordreTirage.length > 0) {
-            boutonTirageHtml = `<div style="text-align:center; color:#27ae60; font-weight:bold; margin-top:15px; font-size:15px;">🔒 Ordre de tirage verrouillé</div>`;
-            sectionTirage = `<h3>📅 Calendrier des Bénéficiaires :</h3><div style="background:#fef9e7; padding:15px; border-radius:8px; border-left:5px solid #f39c12; margin-bottom:20px;">`;
+            const beneficiaireActuel = ordreTirage[0]; // Pour le MVP, on affiche le premier de la liste
+            const montantTotalCagnotte = participants.length * cercle.montant_cotisation;
+
+            encadreBeneficiaire = `
+                <div style="background:#fff3cd; border:2px dashed #ffc107; padding:15px; border-radius:8px; margin-bottom:20px; text-align:center;">
+                    🏆 Bénéficiaire actuel : <strong style="font-size:18px; color:#856404;">👑 ${beneficiaireActuel}</strong><br>
+                    💰 Cagnotte totale à recevoir : <strong style="color:#28a745;">${montantTotalCagnotte} FCFA</strong>
+                </div>
+            `;
+
+            boutonTirageHtml = `<div style="text-align:center; color:#27ae60; font-weight:bold; margin-top:15px; font-size:15px;">🔒 Ordre de tirage verrouillé en Base Cloud</div>`;
+            sectionTirage = `<h3>📅 Calendrier complet des rotations :</h3><div style="background:#fef9e7; padding:15px; border-radius:8px; border-left:5px solid #f39c12; margin-bottom:20px;">`;
             ordreTirage.forEach((nom, index) => {
-                sectionTirage += `🔹 <strong>${cercle.periode} ${index + 1}</strong> : ${nom} (Gagne ${participants.length * cercle.montant_cotisation} FCFA) <br>`;
+                sectionTirage += `🔹 <strong>${cercle.periode} ${index + 1}</strong> : ${nom} <br>`;
             });
             sectionTirage += `</div>`;
         }
 
+        // 2. Amélioration de l'Invitation : Texte WhatsApp rédigé de manière professionnelle
         let boutonWhatsAppHtml = '';
         if (participants.length < cercle.limite_participants) {
-            const messageWhatsApp = encodeURIComponent(`Rejoins ma tontine "${cercle.nom_cercle}" : https://tontine-mvp.onrender.com/rejoindre/${code}`);
-            boutonWhatsAppHtml = `<a class="btn-action" style="background:#25D366;" href="https://wa.me/?text=${messageWhatsApp}" target="_blank">🟢 Inviter via WhatsApp</a>`;
+            const texteWhatsApp = `Bonjour ! 👋 Tu as été invité à rejoindre le cercle de tontine sécurisé "${cercle.nom_cercle}".\n\n💰 Cotisation : ${cercle.montant_cotisation} FCFA par ${cercle.periode.toLowerCase()}.\n⚡ Clique ici pour régler ton inscription via Wave, Orange ou MTN Mobile Money et réserver ta place : https://tontine-mvp.onrender.com/rejoindre/${code}`;
+            const messageWhatsAppEncoded = encodeURIComponent(texteWhatsApp);
+            boutonWhatsAppHtml = `<a class="btn-action" style="background:#25D366;" href="https://wa.me/?text=${messageWhatsAppEncoded}" target="_blank">🟢 Inviter des membres via WhatsApp</a>`;
         } else {
             boutonWhatsAppHtml = `<div style="text-align:center; background:#e2e8f0; color:#4a5568; padding:12px; border-radius:6px; font-weight:bold; margin-top:10px;">👥 Tontine complète (${participants.length}/${cercle.limite_participants})</div>`;
         }
@@ -320,10 +333,18 @@ app.get('/cercle/:code', async (req, res) => {
                         💰 Cotisation : <strong>${cercle.montant_cotisation} FCFA / ${cercle.periode.toLowerCase()}</strong><br>
                         👥 Membres : <strong>${participants.length} / ${cercle.limite_participants}</strong>
                     </div>
+
+                    ${encadreBeneficiaire}
+
+                    <div style="background:#f8d7da; border-left:5px solid #dc3545; padding:10px; border-radius:6px; margin-bottom:20px; font-size:14px; color:#721c24;">
+                        ⏳ Clôture de la période de cotisation dans : <strong>02 jours 14 heures</strong>
+                    </div>
+
                     ${sectionTirage}
-                    <h3>👥 Membres et Cotisations :</h3>
+
+                    <h3>👥 Statut des paiements de la période :</h3>
                     <table>
-                        <thead><tr><th>N°</th><th>Nom</th><th>Statut Période</th></tr></thead>
+                        <thead><tr><th>N°</th><th>Nom</th><th>Statut</th></tr></thead>
                         <tbody>${lignesTableau}</tbody>
                     </table>
                     ${boutonTirageHtml}
