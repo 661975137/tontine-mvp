@@ -31,9 +31,9 @@ app.get('/', (req, res) => {
             <div class="card">
                 <h1>🚀 Nouvelle Tontine</h1>
                 <label for="nom">🎯 Nom du cercle</label>
-                <input type="text" id="nom" placeholder="Ex: Tontine Pro..." required>
+                <input type="text" id="nom" placeholder="Ex: Tontine Côte d'Ivoire..." required>
                 <label for="montant">💰 Montant de la cotisation (FCFA)</label>
-                <input type="number" id="montant" placeholder="Ex: 25000" required>
+                <input type="number" id="montant" placeholder="Ex: 10000" required>
                 <label for="periode">📅 Période des rotations</label>
                 <select id="periode">
                     <option value="Semaine">Par Semaine</option>
@@ -77,6 +77,7 @@ app.post('/creer-cercle', async (req, res) => {
     } catch (err) { res.status(500).json({ error: "Erreur" }); }
 });
 
+// Page de paiement mise à jour avec le script officiel CinetPay
 app.get('/rejoindre/:code', async (req, res) => {
     const code = req.params.code;
     try {
@@ -93,6 +94,7 @@ app.get('/rejoindre/:code', async (req, res) => {
         }
 
         const totalReglement = Math.round(cercle.montant_cotisation * 1.01);
+        const transactionId = 'CP-' + Math.floor(100000 + Math.random() * 900000);
 
         res.send(`
             <!DOCTYPE html>
@@ -100,24 +102,24 @@ app.get('/rejoindre/:code', async (req, res) => {
             <head>
                 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
                 <title>Rejoindre la tontine</title>
-                <script src="https://cdn.fedapay.com/checkout.js?v=1.1.7"></script>
+                <script src="https://cdn.cinetpay.com/seamless/main.js"></script>
                 <style>
                     body { font-family: Arial, sans-serif; text-align: center; background-color: #f4f4f9; padding: 20px; }
                     .card { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); display: inline-block; max-width: 400px; width: 100%; text-align: left; box-sizing: border-box; }
                     input { width: 100%; padding: 12px; margin: 10px 0 15px 0; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; font-size: 16px; }
-                    #pay-button { background-color: #e74c3c; color: white; border: none; padding: 14px; border-radius: 6px; font-weight: bold; width: 100%; font-size: 16px; cursor: pointer; }
+                    #pay-button { background-color: #3498db; color: white; border: none; padding: 14px; border-radius: 6px; font-weight: bold; width: 100%; font-size: 16px; cursor: pointer; }
                     .price-box { background: #fef9e7; border-left: 5px solid #f1c40f; padding: 12px; margin-bottom: 20px; border-radius: 6px; }
                 </style>
             </head>
             <body>
                 <div class="card">
-                    <h1 style="text-align:center; color:#e74c3c; margin-top:0;">👋 Inscription</h1>
+                    <h1 style="text-align:center; color:#3498db; margin-top:0;">👋 Inscription</h1>
                     <p>Cercle : <strong>${cercle.nom_cercle}</strong></p>
                     
                     <div class="price-box">
                         💰 Cotisation : <strong>${cercle.montant_cotisation} FCFA</strong><br>
                         ⚡ Frais (1%) : <strong>${Math.round(cercle.montant_cotisation * 0.01)} FCFA</strong><br>
-                        🛒 Total à régler : <strong style="color:#e67e22;">${totalReglement} FCFA</strong>
+                        🛒 Total (Wave/Orange/MTN/Moov) : <strong style="color:#e67e22;">${totalReglement} FCFA</strong>
                     </div>
 
                     <p>👥 Places disponibles : <strong>${placesDisponibles} / ${cercle.limite_participants}</strong></p>
@@ -128,49 +130,58 @@ app.get('/rejoindre/:code', async (req, res) => {
                     <label for="email" style="font-weight:bold;">📧 Ton Email :</label>
                     <input type="email" id="email" placeholder="Ex: tonemail@gmail.com" required>
                     
-                    <button id="pay-button">🚀 Valider et Payer via FedaPay</button>
+                    <button id="pay-button" onclick="lancerCinetPay()">🚀 Payer via CinetPay</button>
                 </div>
 
                 <script>
-                    const bouton = document.getElementById('pay-button');
-                    
-                    bouton.addEventListener('click', function() {
+                    function lancerCinetPay() {
                         const prenom = document.getElementById('prenom').value.trim();
                         const email = document.getElementById('email').value.trim();
                         
                         if(!prenom || !email) return alert("Remplis ton prénom et ton adresse email !");
 
-                        FedaPay.init('#pay-button', {
-                            public_key: '${process.env.FEDAPAY_PUBLIC_KEY}',
-                            transaction: {
-                                amount: ${totalReglement},
-                                description: 'Cotisation Tontine - ' + prenom
-                            },
-                            customer: {
-                                firstname: prenom,
-                                email: email
-                            },
-                            onComplete: async function(response) {
-                                if (response.status === 'approved' || response.status === 'successful' || response.status.toLowerCase() === 'transferred') {
-                                    // Sauvegarde immédiate en base de données Cloud
-                                    await fetch('/valider-inscription-directe', {
-                                        method: 'POST',
-                                        headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({ nom: prenom, code: '${code}' })
-                                    });
-                                    window.location.href = '/cercle/${code}';
-                                } else {
-                                    // Route de secours automatique au cas ou le statut renvoyé a un libellé custom
-                                    await fetch('/valider-inscription-directe', {
-                                        method: 'POST',
-                                        headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({ nom: prenom, code: '${code}' })
-                                    });
-                                    window.location.href = '/cercle/${code}';
-                                }
+                        CinetPay.setConfig({
+                            apikey: '${process.env.CINETPAY_API_KEY}',
+                            site_id: '${process.env.CINETPAY_SITE_ID}',
+                            notify_url: 'https://tontine-mvp.onrender.com/valider-inscription-directe'
+                        });
+
+                        CinetPay.getCheckout({
+                            transaction_id: '${transactionId}',
+                            amount: ${totalReglement},
+                            currency: 'XOF',
+                            channels: 'ALL',
+                            description: 'Cotisation Tontine - ' + prenom,
+                            customer_name: prenom,
+                            customer_surname: prenom,
+                            customer_email: email,
+                            customer_phone_number: '0700000000',
+                            customer_address: 'Abidjan',
+                            customer_city: 'Abidjan',
+                            customer_country: 'CI',
+                            customer_state: 'CI',
+                            customer_zip_code: '00225'
+                        });
+
+                        CinetPay.waitResponse(async function(data) {
+                            if (data.status === "REFUSED") {
+                                alert("Paiement annulé ou refusé.");
+                            } else if (data.status === "ACCEPTED") {
+                                // Validation immediate en BDD après accord du guichet CinetPay
+                                const validation = await fetch('/valider-inscription-directe', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ nom: prenom, code: '${code}' })
+                                });
+                                window.location.href = '/cercle/${code}';
                             }
                         });
-                    });
+
+                        CinetPay.onError(function(data) {
+                            console.error(data);
+                            alert("Erreur CinetPay: " + data.description);
+                        });
+                    }
                 </script>
             </body>
             </html>
@@ -214,6 +225,7 @@ app.post('/lancer-tirage/:code', async (req, res) => {
     } catch (err) { res.status(500).json({ error: "Erreur" }); }
 });
 
+// Tableau de bord
 app.get('/cercle/:code', async (req, res) => {
     const code = req.params.code;
     try {
@@ -313,4 +325,4 @@ app.get('/cercle/:code', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => { console.log(`🚀 Production stable sur le port ${PORT}`); });
+app.listen(PORT, () => { console.log(`🚀 Serveur CinetPay en ligne sur ${PORT}`); });
