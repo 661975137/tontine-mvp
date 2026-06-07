@@ -77,7 +77,6 @@ app.post('/creer-cercle', async (req, res) => {
     } catch (err) { res.status(500).json({ error: "Erreur" }); }
 });
 
-// Page d'inscription avec intégration directe du Widget FedaPay Checkout
 app.get('/rejoindre/:code', async (req, res) => {
     const code = req.params.code;
     try {
@@ -141,9 +140,9 @@ app.get('/rejoindre/:code', async (req, res) => {
                         
                         if(!prenom || !email) return alert("Remplis ton prénom et ton adresse email !");
 
-                        // Initialisation directe du Checkout FedaPay sans passer par le serveur
+                        // Utilisation dynamique de ta variable publique configurée sur Render
                         FedaPay.init('#pay-button', {
-                            public_key: 'pk_live_fT0T4mP2G6R9v8B1D4z7K3w0', // Utilise ta clé publique visible sur ton écran FedaPay
+                            public_key: '${process.env.FEDAPAY_PUBLIC_KEY || "pk_live_insérer_ici_si_besoin"}',
                             transaction: {
                                 amount: ${totalReglement},
                                 description: 'Cotisation Tontine - ' + prenom
@@ -153,7 +152,6 @@ app.get('/rejoindre/:code', async (req, res) => {
                                 email: email
                             },
                             onComplete: async function(response) {
-                                // Des que le paiement est validé (approved ou successful)
                                 if (response.status === 'approved' || response.status === 'successful') {
                                     const validation = await fetch('/valider-inscription-directe', {
                                         method: 'POST',
@@ -178,7 +176,6 @@ app.get('/rejoindre/:code', async (req, res) => {
     } catch (err) { res.status(500).send("Erreur"); }
 });
 
-// Inscription immédiate après confirmation du widget client
 app.post('/valider-inscription-directe', async (req, res) => {
     const { nom, code } = req.body;
     try {
@@ -314,4 +311,4 @@ app.get('/cercle/:code', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => { console.log(`🚀 Serveur Checkout actif sur le port ${PORT}`); });
+app.listen(PORT, () => { console.log(`🚀 Serveur actif sur le port ${PORT}`); });
