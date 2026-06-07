@@ -12,6 +12,7 @@ const pool = new Pool({
 });
 
 const FEDAPAY_SECRET_KEY = process.env.FEDAPAY_SECRET_KEY || '';
+const FEDAPAY_API_URL = 'https://api.fedapay.com/v1';
 
 // Accueil
 app.get('/', (req, res) => {
@@ -132,7 +133,7 @@ app.get('/rejoindre/:code', async (req, res) => {
 
                     <div id="fallback-ui" class="fallback-box">
                         <h3 style="color:#e53e3e; margin-top:0;">⚠️ Mode Manuel Activé</h3>
-                        <p>FedaPay est en cours de validation. Utilise ce code dans les notes Wave :<br>
+                        <p>Une perturbation est survenue. Utilise ce code dans les notes Wave :<br>
                         <span style="font-size:22px; font-weight:bold; color:#e53e3e; display:block; text-align:center; margin:10px 0;" id="display-rec"></span></p>
                         <button style="background:#25D366; width:100%; padding:12px; color:white; font-weight:bold; border:none; border-radius:6px; margin-bottom:10px;" onclick="ouvrirWaveDirect()">📱 Ouvrir Wave</button>
                         <button style="background:#4a5568; width:100%; padding:12px; color:white; font-weight:bold; border:none; border-radius:6px;" onclick="verifierRecuManual()">🔄 Vérifier mon reçu</button>
@@ -140,15 +141,12 @@ app.get('/rejoindre/:code', async (req, res) => {
                 </div>
                 <script>
                     let currentRecCode = '';
-                    let prenomGlobal = '';
-
                     async function lancerPaiement() {
                         const prenom = document.getElementById('prenom').value.trim();
                         if(!prenom) return alert("Mets ton prénom !");
-                        prenomGlobal = prenom;
                         
                         const btn = document.getElementById('btn-pay');
-                        btn.innerText = "⏳ Connexion aux serveurs...";
+                        btn.innerText = "⏳ Génération du guichet sécurisé...";
                         btn.disabled = true;
 
                         const response = await fetch('/creer-session-fedapay', {
@@ -161,7 +159,6 @@ app.get('/rejoindre/:code', async (req, res) => {
                         if(data.url) {
                             window.location.href = data.url;
                         } else {
-                            // Détection automatique du compte FedaPay non activé -> Bascule sans coupure
                             currentRecCode = data.cleRecu || ('REC-' + Math.floor(1000 + Math.random() * 9000));
                             document.getElementById('display-rec').innerText = currentRecCode;
                             document.getElementById('payment-main').style.display = 'none';
@@ -199,8 +196,8 @@ app.post('/creer-session-fedapay', async (req, res) => {
         const total = Math.round(cercleRes.rows[0].montant_cotisation * 1.01);
         const emailFictif = `${nom.toLowerCase().replace(/[^a-z0-9]/g, '')}-${code}@tontine.local`;
 
-        // Tentative d'appel sécurisé à l'API FedaPay
-        const response = await axios.post('https://api.fedapay.com/v1/transactions', {
+        // Étape 1 : Créer la transaction
+        const response = await axios.post(`${FEDAPAY_API_URL}/transactions`, {
             amount: total,
             currency: { iso: 'XOF' },
             description: `Tontine - ${nom}`,
@@ -208,17 +205,18 @@ app.post('/creer-session-fedapay', async (req, res) => {
             customer: { firstname: nom, email: emailFictif }
         }, {
             headers: { Authorization: `Bearer ${FEDAPAY_SECRET_KEY}` },
-            timeout: 4000
+            timeout: 5000
         });
 
+        // Étape 2 : Générer le token de redirection marchand
         const transactionId = response.data.v1.transaction.id;
-        const tokenResponse = await axios.post(`https://api.fedapay.com/v1/transactions/${transactionId}/token`, {}, {
+        const tokenResponse = await axios.post(`${FEDAPAY_API_URL}/transactions/${transactionId}/token`, {}, {
             headers: { Authorization: `Bearer ${FEDAPAY_SECRET_KEY}` }
         });
 
         res.json({ url: tokenResponse.data.v1.token.url });
     } catch (err) {
-        // Sauvegarde silencieuse en BDD pour le mode Fallback manuel en cas de compte FedaPay restreint
+        console.error("Erreur FedaPay API capturée, bascule en mode secours.");
         await pool.query('INSERT INTO recus_paiement (nom_participant, code_invitation, cle_recu) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING', [nom, code, cleRecu]);
         res.json({ fallback: true, cleRecu });
     }
